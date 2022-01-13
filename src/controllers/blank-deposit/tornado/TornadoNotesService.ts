@@ -26,24 +26,21 @@ import { WorkerRunner } from '../../../infrastructure/workers/WorkerRunner';
 import { CircuitInput } from './types';
 import { IProverWorker } from './IProverWorker';
 import log from 'loglevel';
+import { NextDepositResult } from '../notes/INotesService';
+import { BlankDepositVault } from '../BlankDepositVault';
 
 type ContractsType = Map<
     string,
     {
         contract?: ITornadoContract;
-        getNextDeposit?: AsyncGenerator<
-            {
-                spent?: boolean;
-                deposit: INoteDeposit;
-                exists?: boolean;
-                timestamp?: number;
-                increment?: () => number;
-            },
-            void,
-            unknown
-        >;
     }
 >;
+
+/**
+ * The amount of derivations forward to do as safeguard
+ * for possible holes in the derivations due to chain reorganization
+ */
+const DERIVATIONS_FORWARD = 10;
 
 export class TornadoNotesService extends NotesService {
     private contracts: ContractsType;
@@ -54,6 +51,7 @@ export class TornadoNotesService extends NotesService {
     constructor(
         private readonly _networkController: NetworkController,
         private readonly _tornadoEventsDb: TornadoEventsDB,
+        private readonly _blankDepositVault: BlankDepositVault,
         public updateTornadoEvents: (
             eventType: TornadoEvents,
             currencyAmountPair: CurrencyAmountPair,
@@ -62,8 +60,7 @@ export class TornadoNotesService extends NotesService {
         ) => Promise<void>,
         public getFailedDeposits: (
             pair: CurrencyAmountPair
-        ) => Promise<IBlankDeposit[]>,
-        public dropFailed: (depositId: string) => Promise<void>
+        ) => Promise<IBlankDeposit[]>
     ) {
         super();
         this.contracts = new Map();
@@ -466,6 +463,7 @@ export class TornadoNotesService extends NotesService {
             chainId,
             pair
         );
+
         const hashedKey = await this.getBlake3Hash(derivedKey);
 
         // Extract nullifier and secret from the hashedKey
@@ -500,86 +498,95 @@ export class TornadoNotesService extends NotesService {
         };
     }
 
-    protected async *getNextUnderivedDeposit(
+    protected async getNextUnderivedDeposit(
         currencyAmountPairKey: string,
-        numberOfDeposits?: number
-    ): AsyncGenerator<
-        {
-            spent?: boolean;
-            deposit: INoteDeposit;
-            timestamp?: number;
-            exists?: boolean;
-            increment?: () => number;
-        },
-        void,
-        unknown
-    > {
-        let depositIndex = numberOfDeposits || 0;
+        numberOfDeposits = 0,
+        isReconstruct = false,
+        ignoreFetch = false,
+        chainId: number = this._networkController.network.chainId
+    ): Promise<{
+        spent?: boolean;
+        deposit: INoteDeposit;
+        timestamp?: number;
+        exists?: boolean;
+        replacedFailedDeposit?: boolean;
+    }> {
+        let depositIndex = numberOfDeposits;
 
-        while (true) {
-            if (!this.isRootPathSet()) {
-                throw new Error(
-                    'The wallet has not been initialized or it is locked'
-                );
-            }
+        if (!this.isRootPathSet()) {
+            throw new Error(
+                'The wallet has not been initialized or it is locked'
+            );
+        }
 
-            // Get network
-            const { chainId, name: network } = this._networkController.network;
+        // Get network
+        const { name: network } =
+            this._networkController.getNetworkFromChainId(chainId)!;
 
-            // Get contract
-            if (!this.contracts.has(currencyAmountPairKey)) {
-                throw new Error('Contract not available!');
-            }
-            const { contract } = this.contracts.get(currencyAmountPairKey)!;
+        // Get contract
+        if (!this.contracts.has(currencyAmountPairKey)) {
+            throw new Error('Contract not available!');
+        }
+        const { contract } = this.contracts.get(currencyAmountPairKey)!;
 
-            // Get currency amount pair
-            const currencyAmountPair = keyToCurrencyAmountPair(
-                currencyAmountPairKey
+        // Get currency amount pair
+        const currencyAmountPair = keyToCurrencyAmountPair(
+            currencyAmountPairKey
+        );
+
+        // Check if there's a failed deposit to use that key first before deriving.
+        const failedDeposits = await this.getFailedDeposits(currencyAmountPair);
+        depositIndex =
+            failedDeposits.length !== 0
+                ? failedDeposits[0].depositIndex
+                : depositIndex;
+
+        // Derive deposit
+        const deposit = await this.createDeposit(
+            depositIndex,
+            chainId,
+            currencyAmountPair
+        );
+
+        // Drop failed deposit if deriving it again
+        if (failedDeposits.length !== 0) {
+            await this._blankDepositVault.dropFailedDeposit(
+                failedDeposits[0].id
+            );
+        }
+
+        // Check if commitment exist and if it's been spent
+        try {
+            // Try to pick the derived deposit from the events
+            let depEv = await this._tornadoEventsDb.getDepositEventByCommitment(
+                network as AvailableNetworks,
+                currencyAmountPair,
+                deposit.commitmentHex
             );
 
-            // Check if there's a failed deposit to use that key first before deriving
-            const failedDeposits = await this.getFailedDeposits(
-                currencyAmountPair
-            );
-            depositIndex =
-                failedDeposits.length !== 0
-                    ? failedDeposits[0].depositIndex
-                    : depositIndex;
-
-            // Derive deposit
-            const deposit = await this.createDeposit(
-                depositIndex,
-                chainId,
-                currencyAmountPair
-            );
-
-            // Drop failed deposit if deriving it again
-            if (failedDeposits.length !== 0) {
-                await this.dropFailed(failedDeposits[0].id);
-            }
-
-            // Check if commitment exist and if it's been spent
-            try {
-                // Try to pick the derived deposit from the events
-                let depEv =
-                    await this._tornadoEventsDb.getDepositEventByCommitment(
-                        network as AvailableNetworks,
-                        currencyAmountPair,
-                        deposit.commitmentHex
-                    );
-
+            // If ignoreFetch flag is not set, check again
+            // after updating the deposit events
+            if (!ignoreFetch) {
                 if (!depEv) {
                     try {
-                        // Update events
+                        // Update deposit events
                         await this.getDepositEvents(
                             contract!,
                             currencyAmountPair
                         );
                     } catch (err) {
-                        log.warn(
-                            'Unable to update the deposits events, tree may be outdated',
-                            err.message || err
-                        );
+                        if (isReconstruct) {
+                            log.error(
+                                'Unable to update the deposits events. Halting reconstruction',
+                                err.message || err
+                            );
+                            throw err;
+                        } else {
+                            log.warn(
+                                'Unable to update the deposits events, tree may be outdated',
+                                err.message || err
+                            );
+                        }
                     }
                     depEv =
                         await this._tornadoEventsDb.getDepositEventByCommitment(
@@ -588,11 +595,21 @@ export class TornadoNotesService extends NotesService {
                             deposit.commitmentHex
                         );
                 }
+            }
 
-                // Check if deposit exists
-                if (depEv) {
-                    let spent: boolean | undefined;
-                    try {
+            // Check if deposit exists
+            if (depEv) {
+                let spent: boolean | undefined;
+                try {
+                    spent = await this._tornadoEventsDb.isSpent(
+                        network as AvailableNetworks,
+                        currencyAmountPair,
+                        deposit.nullifierHex
+                    );
+
+                    // If isSpent is false, update withdrawal events
+                    // for checking whether the not has already been spent
+                    if (!spent) {
                         await this.getWithdrawalEvents(
                             contract!,
                             currencyAmountPair
@@ -602,152 +619,168 @@ export class TornadoNotesService extends NotesService {
                             currencyAmountPair,
                             deposit.nullifierHex
                         );
-                    } catch (error) {
-                        log.error('Unable to check if deposit has been spent');
-                        spent = undefined;
                     }
-
-                    // If deposits exists increment counter and yield it
-                    depositIndex++;
-                    const timestamp = Number(depEv.timestamp) * 1000;
-                    yield {
-                        spent,
-                        deposit,
-                        exists: true,
-                        timestamp,
-                    };
-                } else {
-                    // If deposits does not exist just yield it
-                    // Incrementation will be done in case the deposit is succesfully sent to Tornado
-                    yield {
-                        deposit,
-                        exists: false,
-                        increment:
-                            failedDeposits.length !== 0
-                                ? undefined
-                                : () => depositIndex++,
-                    };
+                } catch (error) {
+                    log.error('Unable to check if deposit has been spent');
+                    spent = undefined;
                 }
-            } catch (error) {
-                // If an error ocurred just yield the derived deposit
-                log.error('Unable to check if deposit exists', error);
-                yield {
+
+                // If deposits exists increment counter and yield it
+                depositIndex++;
+                const timestamp = Number(depEv.timestamp) * 1000;
+                return {
+                    spent,
                     deposit,
+                    exists: true,
+                    timestamp,
+                };
+            } else {
+                // If deposits does not exist just yield it
+                // Incrementation will be done in case the deposit is succesfully sent to Tornado
+                return {
+                    deposit,
+                    exists: false,
+                    replacedFailedDeposit: failedDeposits.length !== 0,
                 };
             }
+        } catch (error) {
+            // If an error ocurred just yield the derived deposit
+            log.error('Unable to check if deposit exists', error);
+            return {
+                deposit,
+            };
         }
     }
 
-    /**
-     * Iterates over single currency/amount pair possible deposits
-     */
-    private async getCurrencyAmountPairDeposits(
-        currencyAmountPairKey: string
-    ): Promise<IBlankDeposit[]> {
-        // Get key for contracts map
-        if (!this.contracts.has(currencyAmountPairKey)) {
-            throw new Error('Currency/pair not supported');
+    public async importNotes(
+        unlockPhrase?: string,
+        mnemonic?: string,
+        chainId: number = this._networkController.network.chainId
+    ): Promise<void> {
+        // Unlock vault if unlockPhrase provided
+        if (unlockPhrase) {
+            await this._blankDepositVault.unlock(unlockPhrase);
         }
 
-        const { getNextDeposit } = this.contracts.get(currencyAmountPairKey)!;
+        const depositsPromise: () => Promise<{
+            deposits: IBlankDeposit[];
+            errors: string[];
+            // eslint-disable-next-line no-async-promise-executor
+        }> = async () => {
+            try {
+                // Reconstruct deposits
+                const currentNetworkDepositsResult = await this.reconstruct(
+                    mnemonic,
+                    chainId
+                );
 
-        // Check for deposits
-        const deposits: IBlankDeposit[] = [];
-
-        // Disabled rule as needed to iterate through all the deposits
-        // eslint-disable-next-line no-constant-condition
-        while (true) {
-            const deposit = (await getNextDeposit!.next()).value;
-            if (!(deposit instanceof Object))
-                throw new Error('Internal error in generator');
-
-            if (!deposit.exists) {
-                if (typeof deposit.exists === 'undefined') {
-                    log.error(
-                        'Unable to check if the deposit exists. Halting reconstruction'
-                    );
-                    throw new Error('Unable to check if the deposit exists');
+                // Add fulfilled promises only and push errors for rejected ones
+                let deposits: IBlankDeposit[] = [];
+                const errors: string[] = [];
+                for (const deposit of currentNetworkDepositsResult) {
+                    if (deposit.status === 'fulfilled') {
+                        const recovered = deposit.value.recoveredDeposits;
+                        if (recovered) {
+                            for (let i = 0; i < recovered.length; i++) {
+                                if (!recovered[i].chainId) {
+                                    recovered[i].chainId = chainId;
+                                }
+                            }
+                            deposits = deposits.concat(recovered);
+                        }
+                    } else {
+                        errors.push(deposit.reason.message || deposit.reason);
+                    }
                 }
 
-                break;
+                return { deposits, errors };
+            } catch (error) {
+                return error;
             }
+        };
 
-            deposits.push({
-                id: uuid(),
-                note: deposit.deposit.preImage.toString('hex'),
-                nullifierHex: deposit.deposit.nullifierHex,
-                spent: deposit.spent,
-                pair: keyToCurrencyAmountPair(currencyAmountPairKey),
-                timestamp: deposit.timestamp || new Date().getTime(),
-                status: DepositStatus.CONFIRMED,
-                depositIndex: deposit.deposit.depositIndex,
-            });
-        }
-
-        return deposits;
+        return this._blankDepositVault.importDeposit(depositsPromise, chainId);
     }
 
     public async reconstruct(
         mnemonic?: string,
-        lastDepositIndex = 0
-    ): Promise<PromiseSettledResult<IBlankDeposit[]>[]> {
-        const promises: Promise<IBlankDeposit[]>[] = [];
+        chainId?: number
+    ): Promise<PromiseSettledResult<NextDepositResult>[]> {
+        const promises: Promise<NextDepositResult>[] = [];
 
         if (mnemonic) {
             await this.setRootPath(mnemonic);
         }
 
-        for (const [key, value] of this.contracts) {
+        for (const [key] of this.contracts) {
             // Init path
-            const { currency } = keyToCurrencyAmountPair(key);
+            const pair = keyToCurrencyAmountPair(key);
 
-            if (!Object.keys(CurrencyAmountArray).includes(currency)) {
+            if (!Object.keys(CurrencyAmountArray).includes(pair.currency)) {
                 continue;
             }
 
-            if (mnemonic) {
-                value.getNextDeposit = this.getNextUnderivedDeposit(
-                    key,
-                    lastDepositIndex
-                );
-            }
-
             // Init generator from last number of deposit defaulting to zero index start
-            promises.push(this.getCurrencyAmountPairDeposits(key));
+            promises.push(this.getNextFreeDeposit(pair, true, chainId));
         }
 
         return Promise.allSettled(promises);
     }
 
     public async getNextFreeDeposit(
-        currencyAmountPair: CurrencyAmountPair
-    ): Promise<{
-        nextDeposit: {
-            spent?: boolean | undefined;
-            deposit: INoteDeposit;
-            pair: CurrencyAmountPair;
-        };
-        increment?: () => number;
-        recoveredDeposits?: IBlankDeposit[];
-    }> {
+        currencyAmountPair: CurrencyAmountPair,
+        isReconstruct = false,
+        chainId?: number
+    ): Promise<NextDepositResult> {
         // Get key for contracts map
         const currencyAmountPairKey =
             currencyAmountPairToMapKey(currencyAmountPair);
         if (!this.contracts.has(currencyAmountPairKey)) {
             throw new Error('Currency/pair not supported');
         }
-
-        const { getNextDeposit } = this.contracts.get(currencyAmountPairKey)!;
+        const { contract } = this.contracts.get(currencyAmountPairKey)!;
+        if (!contract) {
+            throw new Error('Unexpected error');
+        }
 
         let nextDeposit: any = {};
         const recoveredDeposits: IBlankDeposit[] = [];
-        let increment = undefined;
+
+        if (isReconstruct) {
+            try {
+                await Promise.all([
+                    this.getDepositEvents(contract, currencyAmountPair, true),
+                    this.getWithdrawalEvents(
+                        contract,
+                        currencyAmountPair,
+                        true
+                    ),
+                ]);
+            } catch (error) {
+                throw new Error('Unable to make initial event fetch');
+            }
+        }
+
+        // Reset next deposit index in vault to Zero
+        let depositIndex = isReconstruct
+            ? 0
+            : await this._blankDepositVault.getDerivedDepositIndex(
+                  currencyAmountPair,
+                  chainId
+              );
 
         // Disabled rule as needed to iterate through all the deposits
         // eslint-disable-next-line no-constant-condition
         while (true) {
             // At this stage getNextDeposit will be initialized
-            const deposit = (await getNextDeposit!.next()).value;
+            let deposit = await this.getNextUnderivedDeposit(
+                currencyAmountPairKey,
+                depositIndex,
+                isReconstruct,
+                isReconstruct,
+                chainId
+            );
+
             if (!(deposit instanceof Object))
                 throw new Error('Internal error in generator');
 
@@ -757,13 +790,55 @@ export class TornadoNotesService extends NotesService {
                         'Unable to check if the next deposit already exists'
                     );
 
+                // Check that there aren't any holes in the derivation chain
+                let continueDerivating = false;
+                for (let i = 1; i < DERIVATIONS_FORWARD; i++) {
+                    const potentialDeposit = await this.getNextUnderivedDeposit(
+                        currencyAmountPairKey,
+                        depositIndex + i,
+                        isReconstruct,
+                        true,
+                        chainId
+                    );
+
+                    if (typeof deposit.exists === 'undefined') {
+                        throw new Error(
+                            'Unable to check if the next deposit already exists'
+                        );
+                    }
+
+                    if (potentialDeposit.exists) {
+                        deposit = potentialDeposit;
+                        continueDerivating = true;
+                        break;
+                    }
+                }
+
+                // If we have found a hole in the derivation chain,
+                // we store the recovered deposit increment the index and continue
+                if (continueDerivating) {
+                    recoveredDeposits.push({
+                        id: uuid(),
+                        note: deposit.deposit.preImage.toString('hex'),
+                        nullifierHex: deposit.deposit.nullifierHex,
+                        pair: currencyAmountPair,
+                        spent: deposit.spent,
+                        timestamp: deposit.timestamp || new Date().getTime(),
+                        status: DepositStatus.CONFIRMED,
+                        depositIndex: deposit.deposit.depositIndex,
+                    });
+
+                    depositIndex = deposit.deposit.depositIndex + 1;
+                    continue;
+                }
+
+                // Return the next free deposit
                 nextDeposit = {
                     deposit: deposit.deposit,
                     pair: currencyAmountPair,
                     spent: false,
-                };
-
-                increment = deposit.increment;
+                    replacedFailedDeposit: deposit.replacedFailedDeposit,
+                } as NextDepositResult['nextDeposit'];
 
                 break;
             } else {
@@ -777,6 +852,9 @@ export class TornadoNotesService extends NotesService {
                     status: DepositStatus.CONFIRMED,
                     depositIndex: deposit.deposit.depositIndex,
                 });
+
+                // If we found recovered a deposit, increment index
+                depositIndex = deposit.deposit.depositIndex + 1;
             }
         }
 
@@ -784,7 +862,6 @@ export class TornadoNotesService extends NotesService {
             nextDeposit,
             recoveredDeposits:
                 recoveredDeposits.length === 0 ? undefined : recoveredDeposits,
-            increment,
         };
     }
 
@@ -809,17 +886,9 @@ export class TornadoNotesService extends NotesService {
             if (this.contracts.has(key)) {
                 const contractObj = this.contracts.get(key)!;
                 contractObj.contract = value.contract;
-                contractObj.getNextDeposit = this.getNextUnderivedDeposit(
-                    key,
-                    value.depositCount
-                );
             } else {
                 this.contracts.set(key, {
                     contract: value.contract,
-                    getNextDeposit: this.getNextUnderivedDeposit(
-                        key,
-                        value.depositCount
-                    ),
                 });
             }
         }

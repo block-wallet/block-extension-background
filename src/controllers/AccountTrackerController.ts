@@ -25,6 +25,8 @@ import {
     isSingleCallBalancesContractAvailable,
 } from '../utils/balance-checker/balanceChecker';
 import { cloneDeep } from 'lodash';
+import { Network } from '../utils/constants/networks';
+import { PreferencesController } from './PreferencesController';
 
 export interface AccountBalanceToken {
     token: Token;
@@ -65,6 +67,11 @@ export enum AccountTrackerEvents {
     CLEARED_ACCOUNTS = 'CLEARED_ACCOUNTS',
 }
 
+export interface UpdateAccountsOptions {
+    addresses?: string[];
+    assetsAutoDiscovery?: boolean;
+}
+
 export class AccountTrackerController extends BaseController<AccountTrackerState> {
     private readonly _mutex: Mutex;
     constructor(
@@ -72,6 +79,7 @@ export class AccountTrackerController extends BaseController<AccountTrackerState
         private readonly _networkController: NetworkController,
         private readonly _tokenController: TokenController,
         private readonly _tokenOperationsController: TokenOperationsController,
+        private readonly _preferencesController: PreferencesController,
         initialState: AccountTrackerState = {
             accounts: {},
             isAccountTrackerLoading: false,
@@ -80,28 +88,41 @@ export class AccountTrackerController extends BaseController<AccountTrackerState
         super(initialState);
         this._mutex = new Mutex();
 
-        _networkController.on(NetworkEvents.NETWORK_CHANGE, async () => {
-            this.store.updateState({ isAccountTrackerLoading: true });
-            try {
-                // Update the account balances
-                await this.updateAccounts(
-                    Object.keys(this.store.getState().accounts)
-                );
-            } catch (err) {
-                log.warn(
-                    'An error ocurred while updating the accounts',
-                    err.message
-                );
-            } finally {
-                this.store.updateState({ isAccountTrackerLoading: false });
+        _networkController.on(
+            NetworkEvents.NETWORK_CHANGE,
+            async (network: Network) => {
+                this.store.updateState({ isAccountTrackerLoading: true });
+                try {
+                    // Build chain balances
+                    this._buildBalancesForChain(network.chainId);
+
+                    // Update the selected account balances
+                    const selectedAddress =
+                        this._preferencesController.getSelectedAddress();
+
+                    await this.updateAccounts({
+                        addresses: [selectedAddress],
+                        assetsAutoDiscovery: false,
+                    });
+                } catch (err) {
+                    log.warn(
+                        'An error ocurred while updating the accounts',
+                        err.message
+                    );
+                } finally {
+                    this.store.updateState({ isAccountTrackerLoading: false });
+                }
             }
-        });
+        );
         _tokenController.on(
             TokenControllerEvents.USER_TOKEN_CHANGE,
-            async () => {
+            async (accountAddress: string) => {
                 try {
                     // Update the account balances
-                    await this.updateAccounts();
+                    await this.updateAccounts({
+                        addresses: [accountAddress],
+                        assetsAutoDiscovery: false,
+                    });
                 } catch (err) {
                     log.warn(
                         'An error ocurred while updating the accouns',
@@ -137,7 +158,10 @@ export class AccountTrackerController extends BaseController<AccountTrackerState
         // Emit account update
         this.emit(AccountTrackerEvents.ACCOUNT_ADDED, address);
 
-        this.updateAccounts();
+        this.updateAccounts({
+            addresses: [address],
+            assetsAutoDiscovery: true,
+        });
     }
 
     /**
@@ -173,7 +197,10 @@ export class AccountTrackerController extends BaseController<AccountTrackerState
             accounts: trackedAccounts,
         });
 
-        await this.updateAccounts([newAccount]);
+        await this.updateAccounts({
+            addresses: [newAccount],
+            assetsAutoDiscovery: true,
+        });
 
         // Emit account update
         this.emit(AccountTrackerEvents.ACCOUNT_ADDED, newAccount);
@@ -226,7 +253,10 @@ export class AccountTrackerController extends BaseController<AccountTrackerState
             accounts: trackedAccounts,
         });
 
-        await this.updateAccounts([newAccount]);
+        await this.updateAccounts({
+            addresses: [newAccount],
+            assetsAutoDiscovery: true,
+        });
 
         // Emit account update
         this.emit(AccountTrackerEvents.ACCOUNT_ADDED, newAccount);
@@ -283,8 +313,10 @@ export class AccountTrackerController extends BaseController<AccountTrackerState
      * @returns {Promise<void | void[]>} - After all account balances updated
      * @param {string[]?} addresses
      */
-    public async updateAccounts(addresses?: string[]): Promise<void> {
-        const release = !addresses
+    public async updateAccounts(
+        updateAccountsOptions: UpdateAccountsOptions
+    ): Promise<void> {
+        const release = !updateAccountsOptions.addresses
             ? await this._mutex.acquire()
             : () => {
                   return;
@@ -293,7 +325,8 @@ export class AccountTrackerController extends BaseController<AccountTrackerState
         try {
             // Get addresses from state
             const _addresses =
-                addresses || Object.keys(this.store.getState().accounts);
+                updateAccountsOptions.addresses ||
+                Object.keys(this.store.getState().accounts);
 
             // Get network chainId
             const { chainId } = this._networkController.network;
@@ -302,10 +335,15 @@ export class AccountTrackerController extends BaseController<AccountTrackerState
             const provider = this._networkController.getProvider();
 
             // Tokens to fetch balance
-            const assetAddressToGetBalance = [
-                NATIVE_TOKEN_ADDRESS,
-                ...(await this._tokenController.getContractAddresses(chainId)),
-            ];
+            const assetAddressToGetBalance = [NATIVE_TOKEN_ADDRESS];
+
+            if (updateAccountsOptions.assetsAutoDiscovery) {
+                assetAddressToGetBalance.push(
+                    ...(await this._tokenController.getContractAddresses(
+                        chainId
+                    ))
+                );
+            }
 
             for (let i = 0; i < _addresses.length; i++) {
                 // If the chain changed we abort these operations
@@ -340,9 +378,7 @@ export class AccountTrackerController extends BaseController<AccountTrackerState
      */
     private async _updateAccountBalance(
         chainId: number,
-        provider:
-            | ethers.providers.InfuraProvider
-            | ethers.providers.StaticJsonRpcProvider,
+        provider: ethers.providers.StaticJsonRpcProvider,
         accountAddress: string,
         assetAddressToGetBalance: string[]
     ) {
@@ -474,9 +510,7 @@ export class AccountTrackerController extends BaseController<AccountTrackerState
      */
     private async _getAddressBalances(
         chainId: number,
-        provider:
-            | ethers.providers.InfuraProvider
-            | ethers.providers.StaticJsonRpcProvider,
+        provider: ethers.providers.StaticJsonRpcProvider,
         accountAddress: string,
         assetAddressToGetBalance: string[]
     ): Promise<BalanceMap> {
@@ -484,7 +518,7 @@ export class AccountTrackerController extends BaseController<AccountTrackerState
             // If contract is available fetch balances via it, otherwise make call for each one
             if (isSingleCallBalancesContractAvailable(chainId)) {
                 try {
-                    return getAddressBalancesFromSingleCallBalancesContract(
+                    return await getAddressBalancesFromSingleCallBalancesContract(
                         provider,
                         accountAddress,
                         assetAddressToGetBalance,
@@ -495,19 +529,17 @@ export class AccountTrackerController extends BaseController<AccountTrackerState
                         'Error in _getAddressBalances calling getAddressBalancesFromSingleCallBalancesContract',
                         error
                     );
-                    return this._getAddressBalancesFromMultipleCallBalances(
+                    return await this._getAddressBalancesFromMultipleCallBalances(
                         chainId,
                         provider,
-                        accountAddress,
-                        assetAddressToGetBalance
+                        accountAddress
                     );
                 }
             } else {
-                return this._getAddressBalancesFromMultipleCallBalances(
+                return await this._getAddressBalancesFromMultipleCallBalances(
                     chainId,
                     provider,
-                    accountAddress,
-                    assetAddressToGetBalance
+                    accountAddress
                 );
             }
         } catch (error) {
@@ -525,22 +557,20 @@ export class AccountTrackerController extends BaseController<AccountTrackerState
      */
     private async _getAddressBalancesFromMultipleCallBalances(
         chainId: number,
-        provider:
-            | ethers.providers.InfuraProvider
-            | ethers.providers.StaticJsonRpcProvider,
-        accountAddress: string,
-        assetAddressToGetBalance: string[]
+        provider: ethers.providers.StaticJsonRpcProvider,
+        accountAddress: string
     ): Promise<BalanceMap> {
         try {
             const balances: BalanceMap = {};
 
-            if (chainId == 1) {
-                // Mainnet has a huge list of tokens so we can't request them all.
-                assetAddressToGetBalance = [
-                    NATIVE_TOKEN_ADDRESS,
-                    ...(await this._tokenController.getUserTokenContractAddresses()),
-                ];
-            }
+            // The multiple call does not include auto-detection.
+            const assetAddressToGetBalance = [
+                NATIVE_TOKEN_ADDRESS,
+                ...(await this._tokenController.getUserTokenContractAddresses(
+                    accountAddress,
+                    chainId
+                )),
+            ];
 
             // Get all user's token balances
             const tokenBalances = await Promise.allSettled(
@@ -570,6 +600,39 @@ export class AccountTrackerController extends BaseController<AccountTrackerState
                 error
             );
             throw error;
+        }
+    }
+
+    /**
+     * Search in all the accounts the balances for the @param chainId
+     * If it does not exist it create an empty object.
+     *
+     * @param {number} chainId
+     */
+    private _buildBalancesForChain(chainId: number) {
+        const accounts = this.store.getState().accounts;
+        for (const accountAddress in accounts) {
+            const balances = accounts[accountAddress].balances;
+
+            if (!(chainId in balances)) {
+                this.store.updateState({
+                    accounts: {
+                        ...this.store.getState().accounts,
+                        [accountAddress]: {
+                            ...this.store.getState().accounts[accountAddress],
+                            balances: {
+                                ...this.store.getState().accounts[
+                                    accountAddress
+                                ].balances,
+                                [chainId]: {
+                                    nativeTokenBalance: BigNumber.from(0),
+                                    tokens: {},
+                                },
+                            },
+                        },
+                    },
+                });
+            }
         }
     }
 

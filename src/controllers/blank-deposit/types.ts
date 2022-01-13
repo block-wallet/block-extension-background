@@ -26,7 +26,7 @@ export enum KnownCurrencies {
  * Defines a type that types the currency with the available amount types
  */
 export type CurrencyAmountType = {
-    [key in KnownCurrencies]: keyof typeof instances[key]['instanceAddress'];
+    [currency in KnownCurrencies]: keyof typeof instances.currencies[currency]['instances'];
 };
 
 /**
@@ -91,13 +91,31 @@ type CurrencyAmountArrayType = {
  * CurrencyAmountArray
  */
 export const CurrencyAmountArray: CurrencyAmountArrayType = Object.keys(
-    instances
+    instances.currencies
 ).reduce((pv, cv) => {
     const currency = cv as KnownCurrencies;
     if (Object.values(KnownCurrencies).includes(currency)) {
         pv[currency] = Object.keys(
-            instances[currency].instanceAddress
+            instances.currencies[currency].instances
         ).sort() as any[];
     }
     return pv;
 }, {} as CurrencyAmountArrayType);
+
+/**
+ * getTokenDecimals
+ *
+ * Obtains the decimal numbers of a pair token
+ *
+ * @param chainId The note chainId
+ * @param pair The note pair
+ * @returns The pair token decimals
+ */
+export const getTornadoTokenDecimals = (
+    chainId: number,
+    pair: CurrencyAmountPair
+): number => {
+    return TornadoConfig.deployments[
+        `netId${chainId}` as keyof typeof TornadoConfig.deployments
+    ].currencies[pair.currency.toLowerCase() as KnownCurrencies].decimals;
+};

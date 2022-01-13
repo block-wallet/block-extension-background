@@ -2,9 +2,9 @@
 import { BigNumber } from '@ethersproject/bignumber';
 import { ethers } from 'ethers';
 import log from 'loglevel';
-import { FeeData } from '../../GasPricesController';
 import { TransactionGasEstimation } from '../../transactions/TransactionController';
 import {
+    TransactionAdvancedData,
     TransactionCategories,
     TransactionMeta,
 } from '../../transactions/utils/types';
@@ -19,6 +19,7 @@ import {
     PopulatedTransactionParams,
     SignedTransaction,
     SignedTransactionProps,
+    TransactionFeeData,
 } from './SignedTransaction';
 
 /**
@@ -58,12 +59,15 @@ export class TransferTransaction extends SignedTransaction {
      * @param {string} to where the tokens must be transfer
      * @param {BigNumber} amount of the token to transfer
      * @param {FeeData} feeData an object with gas fee data.
+     * @param {TransactionAdvancedData} advancedData an object with tx advanced data.
      */
     public async do(
         tokenAddress: string,
         to: string,
         amount: BigNumber,
-        feeData: FeeData
+        feeData: TransactionFeeData,
+        advancedData: TransactionAdvancedData
+
     ): Promise<string> {
         const transactionMeta = await this.addAsNewTransaction(
             {
@@ -71,7 +75,8 @@ export class TransferTransaction extends SignedTransaction {
                 to,
                 amount,
             } as TransferTransactionPopulatedTransactionParams,
-            feeData
+            feeData,
+            advancedData
         );
         await this.approveTransaction(transactionMeta.id);
 
@@ -137,10 +142,12 @@ export class TransferTransaction extends SignedTransaction {
      *  amount: BigNumber;
      * }
      * @param {FeeData} feeData an object with gas fee data.
+     * @param {TransactionAdvancedData} advancedData an object with transaction advanced data.
      */
     public async addAsNewTransaction(
         populateTransasctionParams: TransferTransactionPopulatedTransactionParams,
-        feeData: FeeData
+        feeData: TransactionFeeData,
+        advancedData?: TransactionAdvancedData
     ): Promise<TransactionMeta> {
         const populatedTransaction = await this.populateTransaction(
             populateTransasctionParams
@@ -149,7 +156,8 @@ export class TransferTransaction extends SignedTransaction {
         const transactionMeta = await this._addAsNewTransaction(
             populatedTransaction,
             feeData,
-            TransactionCategories.TOKEN_METHOD_TRANSFER
+            TransactionCategories.TOKEN_METHOD_TRANSFER,
+            advancedData
         );
 
         try {

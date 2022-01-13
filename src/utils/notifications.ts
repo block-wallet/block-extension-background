@@ -3,10 +3,7 @@ import {
     TransactionMeta,
     TransactionStatus,
 } from '../controllers/transactions/utils/types';
-import {
-    createExplorerLink,
-    createAccountLink,
-} from '@metamask/etherscan-link';
+import { createExplorerLink, createAccountLink } from '@blank/explorer-link';
 
 export const showSetUpCompleteNotification = (): void => {
     const url = '';

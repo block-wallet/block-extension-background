@@ -2,7 +2,7 @@ import { IAccountTokens, ITokens, Token } from './Token';
 import { BaseController } from '../../infrastructure/BaseController';
 import NetworkController from '../NetworkController';
 import NETWORK_TOKENS_LIST, {
-    BLANK_TOKEN_ADDRESS,
+    BLANK_TOKEN_ADDRESSES,
     BLANK_TOKEN_NAME,
     NETWORK_TOKENS_LIST_ARRAY,
 } from './TokenList';
@@ -97,53 +97,58 @@ export class TokenController extends BaseController<TokenControllerState> {
      */
     public async setBlankToken(
         accountAddress?: string,
-        chainId?: number
+        chainId: number = this.getSelectedNetworkChainId()
     ): Promise<void> {
-        const userTokensAddresses = await this.getUserTokenContractAddresses(
-            accountAddress,
-            chainId
-        );
-        const userDeletedTokenAddresses =
-            await this.getDeletedUserTokenContractAddresses(
-                accountAddress,
-                chainId
-            );
+        if (chainId in BLANK_TOKEN_ADDRESSES) {
+            const _blank_token_address = BLANK_TOKEN_ADDRESSES[chainId];
 
-        if (
-            !userTokensAddresses.includes(BLANK_TOKEN_ADDRESS) &&
-            !userDeletedTokenAddresses.includes(BLANK_TOKEN_ADDRESS)
-        ) {
-            const blankToken =
-                (await this.getToken(
-                    BLANK_TOKEN_ADDRESS,
+            const userTokensAddresses =
+                await this.getUserTokenContractAddresses(
                     accountAddress,
                     chainId
-                )) ||
-                (
-                    await this.search(
-                        BLANK_TOKEN_NAME,
-                        true,
+                );
+            const userDeletedTokenAddresses =
+                await this.getDeletedUserTokenContractAddresses(
+                    accountAddress,
+                    chainId
+                );
+
+            if (
+                !userTokensAddresses.includes(_blank_token_address) &&
+                !userDeletedTokenAddresses.includes(_blank_token_address)
+            ) {
+                const blankToken =
+                    (await this.getToken(
+                        _blank_token_address,
                         accountAddress,
                         chainId
-                    )
-                )[0];
+                    )) ||
+                    (
+                        await this.search(
+                            BLANK_TOKEN_NAME,
+                            true,
+                            accountAddress,
+                            chainId
+                        )
+                    )[0];
 
-            // Set token only if it is available on this network
-            if (blankToken) {
-                blankToken.address = toChecksumAddress(blankToken.address);
+                // Set token only if it is available on this network
+                if (blankToken) {
+                    blankToken.address = toChecksumAddress(blankToken.address);
 
-                const { address: blankTokenAddress } = blankToken;
+                    const { address: blankTokenAddress } = blankToken;
 
-                if (
-                    !userTokensAddresses.includes(blankTokenAddress) &&
-                    !userDeletedTokenAddresses.includes(blankTokenAddress)
-                ) {
-                    return this.addCustomToken(
-                        blankToken,
-                        accountAddress,
-                        chainId,
-                        true
-                    );
+                    if (
+                        !userTokensAddresses.includes(blankTokenAddress) &&
+                        !userDeletedTokenAddresses.includes(blankTokenAddress)
+                    ) {
+                        return this.addCustomToken(
+                            blankToken,
+                            accountAddress,
+                            chainId,
+                            true
+                        );
+                    }
                 }
             }
         }
@@ -192,13 +197,19 @@ export class TokenController extends BaseController<TokenControllerState> {
 
     /**
      * Search a token by address, name or symbol
-     * @param search a string to identify  the token
+     *
+     * @param search String to identify  the token.
+     * @param exact For name or symbol search, if should be exact or included in the string. Default is false.
+     * @param accountAddress Account's token list to be used, defaults to selected address.
+     * @param chainId
+     * @param isLocalSearch Limits the search to the local list, default is false.
      */
     public async search(
         search: string,
         exact = false,
         accountAddress?: string,
-        chainId?: number
+        chainId?: number,
+        isLocalSearch = false
     ): Promise<Token[]> {
         if (!search) {
             throw searchParamNotPresentError;
@@ -207,7 +218,7 @@ export class TokenController extends BaseController<TokenControllerState> {
         if (isHexPrefixed(search)) {
             let token = await this.getToken(search, accountAddress, chainId);
 
-            if (!token) {
+            if (!token && !isLocalSearch) {
                 token = await this._tokenOperationsController.populateTokenData(
                     search
                 );
@@ -320,10 +331,19 @@ export class TokenController extends BaseController<TokenControllerState> {
             chainId
         );
 
-        for (let i = 0; i < tokens.length; i++) {
-            const tokenAddress = toChecksumAddress(tokens[i].address);
+        // Preventing to have a token with the same symbol than another one
+        const userSymbols = Object.keys(userTokens).map((key) =>
+            userTokens[key].symbol.toLowerCase()
+        );
 
-            userTokens[tokenAddress] = tokens[i];
+        const cleanedTokens = tokens.filter(
+            (token) => !userSymbols.includes(token.symbol.toLowerCase())
+        );
+
+        for (let i = 0; i < cleanedTokens.length; i++) {
+            const tokenAddress = toChecksumAddress(cleanedTokens[i].address);
+
+            userTokens[tokenAddress] = cleanedTokens[i];
             delete deletedUserTokens[tokenAddress];
         }
 
@@ -343,7 +363,6 @@ export class TokenController extends BaseController<TokenControllerState> {
         chainId: number = this._networkController.network.chainId
     ): Promise<string[]> {
         return NETWORK_TOKENS_LIST_ARRAY[chainId] || [];
-        //return Object.keys(await this.getTokens(chainId));
     }
 
     /**
@@ -445,7 +464,10 @@ export class TokenController extends BaseController<TokenControllerState> {
 
             // Event
             if (!ignoreEvent) {
-                this.emit(TokenControllerEvents.USER_TOKEN_CHANGE);
+                this.emit(
+                    TokenControllerEvents.USER_TOKEN_CHANGE,
+                    accountAddress
+                );
             }
         } finally {
             releaseLock();

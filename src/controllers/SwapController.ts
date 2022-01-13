@@ -7,7 +7,8 @@ import { BigNumber } from 'ethers';
 import axios from 'axios';
 import { TokenOperationsController } from './erc-20/transactions/Transaction';
 import { ApproveTransaction } from './erc-20/transactions/ApproveTransaction';
-import { FeeData, GasPricesController } from './GasPricesController';
+import { GasPricesController } from './GasPricesController';
+import { TransactionFeeData } from './erc-20/transactions/SignedTransaction';
 
 const MAX_UINT_256 = BigNumber.from(
     '115792089237316195423570985008687907853269984665640564039457584007913129639935'
@@ -130,18 +131,17 @@ export class SwapController {
     public approveSender = async (tokenAddress: string): Promise<boolean> => {
         const { chainId } = this._networkController.network;
         const spender = await this._getApproveSender(chainId);
-        const gasPriceLevels =
-            await this._gasPricesController.getGasPriceLevels();
-        let feeData: FeeData;
+        const gasPriceLevels = this._gasPricesController.getGasPricesLevels();
+        let feeData: TransactionFeeData;
 
         if (gasPriceLevels.average.maxPriorityFeePerGas) {
             feeData = {
                 maxPriorityFeePerGas:
                     gasPriceLevels.average.maxPriorityFeePerGas,
-                maxFeePerGas: gasPriceLevels.average.maxFeePerGas,
+                maxFeePerGas: gasPriceLevels.average.maxFeePerGas!,
             };
         } else {
-            feeData = { gasPrice: gasPriceLevels.average.gasPrice };
+            feeData = { gasPrice: gasPriceLevels.average.gasPrice! };
         }
 
         const approveTransaction = new ApproveTransaction({

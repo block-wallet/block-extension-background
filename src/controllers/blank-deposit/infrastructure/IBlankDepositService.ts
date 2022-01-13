@@ -22,6 +22,7 @@ export type ComplianceInfo = {
         transactionHash: string;
         timestamp: Date;
         fee: string;
+        feeBN: BigNumber;
         nullifier: string;
     };
 };
@@ -83,7 +84,7 @@ export interface IBlankDepositService<S>
     /**
      * It returns the list of deposits for the current network
      */
-    getDeposits(): Promise<IBlankDeposit[]>;
+    getDeposits(chainId?: number): Promise<IBlankDeposit[]>;
 
     /**
      * It returns information regarding the deposit importing/reconstruction status

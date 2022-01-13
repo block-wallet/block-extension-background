@@ -13,12 +13,10 @@ import {
 } from '../../transactions/TransactionController';
 import { TokenController } from '../../erc-20/TokenController';
 
-import { GenericVault } from '../infrastructure/GenericVault';
 import {
     ComplianceInfo,
     IBlankDepositService,
 } from '../infrastructure/IBlankDepositService';
-import { IBlankDepositVaultState } from '../infrastructure/IBlankDepositVaultState';
 
 import { TornadoNotesService } from './TornadoNotesService';
 import { currencyAmountPairToMapKey, parseRelayerError } from './utils';
@@ -34,6 +32,7 @@ import {
     CurrencyAmountArray,
     CurrencyAmountPair,
     DepositStatus,
+    getTornadoTokenDecimals,
     KnownCurrencies,
 } from '../types';
 import { IBlankDeposit } from '../BlankDeposit';
@@ -64,14 +63,17 @@ import {
     DepositTransaction,
     DepositTransactionPopulatedTransactionParams,
 } from '../../erc-20/transactions/DepositTransaction';
-import { FeeData } from '../../GasPricesController';
 
 import { FEATURES } from '../../../utils/constants/features';
 import { Network } from '@blank/background/utils/constants/networks';
 import log from 'loglevel';
-import BlockUpdatesController from '../../BlockUpdatesController';
 import { TornadoEventsService } from './TornadoEventsService';
 import { Deposit, Withdrawal } from './stores/ITornadoEventsDB';
+import { TransactionFeeData } from '../../erc-20/transactions/SignedTransaction';
+import { BlankDepositVault } from '../BlankDepositVault';
+import { NextDepositResult } from '../notes/INotesService';
+
+const tornadoDeployments = tornadoConfig.deployments as any;
 
 export interface TornadoServiceProps {
     encryptor?: Encryptor | undefined;
@@ -82,7 +84,6 @@ export interface TornadoServiceProps {
     gasPricesController: GasPricesController;
     tokenOperationsController: TokenOperationsController;
     tokenController: TokenController;
-    blockUpdatesController: BlockUpdatesController;
     tornadoEventsService: TornadoEventsService;
     initialState: BlankDepositControllerStoreState;
 }
@@ -117,7 +118,8 @@ export const DEFAULT_TORNADO_CONFIRMATION = 4;
 
 export class TornadoService
     extends EventEmitter
-    implements IBlankDepositService<BlankDepositControllerStoreState> {
+    implements IBlankDepositService<BlankDepositControllerStoreState>
+{
     // Controllers & Services
     private readonly _notesService: TornadoNotesService;
     private readonly _networkController: NetworkController;
@@ -126,11 +128,10 @@ export class TornadoService
     private readonly _preferencesController: PreferencesController;
     private readonly _tokenController: TokenController;
     private readonly _tokenOperationsController: TokenOperationsController;
-    private readonly _blockUpdatesController: BlockUpdatesController;
     private readonly _tornadoEventsService: TornadoEventsService;
 
     // Stores
-    private readonly _vault: GenericVault<IBlankDepositVaultState>;
+    private readonly _blankDepositVault: BlankDepositVault;
     private readonly _pendingWithdrawalsStore: BaseStoreWithLock<PendingWithdrawalsStore>;
     private readonly _composedStore: ComposedStore<BlankDepositControllerStoreState>;
     private readonly _tornadoEventsDb: TornadoEventsDB;
@@ -150,7 +151,6 @@ export class TornadoService
         this._gasPricesController = props.gasPricesController;
         this._tokenController = props.tokenController;
         this._tokenOperationsController = props.tokenOperationsController;
-        this._blockUpdatesController = props.blockUpdatesController;
         this._tornadoEventsService = props.tornadoEventsService;
 
         this._depositLock = new Mutex();
@@ -160,40 +160,26 @@ export class TornadoService
             props.tornadoEventsDB ||
             new TornadoEventsDB('blank_deposits_events', 1);
 
+        this._blankDepositVault = new BlankDepositVault({
+            networkController: this._networkController,
+            vault: props.initialState.vaultState.vault,
+            encryptor: props.encryptor,
+        });
+
         this._notesService = new TornadoNotesService(
             this._networkController,
             this._tornadoEventsDb,
+            this._blankDepositVault,
             this.updateTornadoEvents,
             async (pair: CurrencyAmountPair) => {
                 return (await this.getDepositsFromPair(pair))
                     .filter((d) => d.status === DepositStatus.FAILED)
                     .sort((a, b) => a.depositIndex - b.depositIndex);
-            },
-            this.dropFailedDeposit
+            }
         );
         this._pendingWithdrawalsStore = new BaseStoreWithLock(
             props.initialState.pendingWithdrawals
         );
-
-        // Default vault state
-        const defVaultState = {
-            deposits: [],
-            errorsInitializing: [],
-            isInitialized: false, // Default to false, we care about this only when wallet is imported
-            isLoading: false,
-        };
-
-        this._vault = new GenericVault({
-            initialState: props.initialState.vaultState.vault,
-            encryptor: props.encryptor,
-            defaultState: {
-                deposits: {
-                    [AvailableNetworks.MAINNET]: defVaultState,
-                    [AvailableNetworks.GOERLI]: defVaultState,
-                },
-                isImported: false,
-            },
-        });
 
         this.tornadoContracts = new Map();
         // Add network change listener
@@ -208,16 +194,10 @@ export class TornadoService
                 // Set tornado contracts
                 await this.setTornadoContract(chainId);
 
-                // Update notes status
-                const vault = await this._vault.retrieve();
-                if (!name || !(name in vault.deposits)) {
-                    throw new Error('Network not supported');
-                }
-
+                const vault = await this._blankDepositVault.getVault(chainId);
                 const { isImported } = vault;
-                const { isInitialized } = vault.deposits[
-                    name as AvailableNetworks
-                ];
+                const { isInitialized } =
+                    vault.deposits[name as AvailableNetworks];
 
                 if (isImported && !isInitialized) {
                     this.importNotes();
@@ -229,12 +209,11 @@ export class TornadoService
             }
         );
 
-        this._composedStore = new ComposedStore<BlankDepositControllerStoreState>(
-            {
-                vaultState: this._vault.store,
+        this._composedStore =
+            new ComposedStore<BlankDepositControllerStoreState>({
+                vaultState: this._blankDepositVault.store,
                 pendingWithdrawals: this._pendingWithdrawalsStore.store,
-            }
-        );
+            });
     }
 
     /**
@@ -243,26 +222,25 @@ export class TornadoService
      * @returns Whether the notes vault is unlocked
      */
     public get isUnlocked(): boolean {
-        return this._vault.isUnlocked;
+        return this._blankDepositVault.isUnlocked;
     }
 
-    public async getImportingStatus(): Promise<{
+    public async getImportingStatus(
+        chainId: number = this._networkController.network.chainId
+    ): Promise<{
         isImported: boolean;
         isInitialized: boolean;
         isLoading: boolean;
         errorsInitializing: string[];
     }> {
-        const { name } = this._networkController.network;
+        const { name } =
+            this._networkController.getNetworkFromChainId(chainId)!;
 
-        const vault = await this._vault.retrieve();
-        if (!name || !(name in vault.deposits)) {
-            throw new Error('Network not supported');
-        }
+        const vault = await this._blankDepositVault.getVault(chainId);
 
         const { isImported } = vault;
-        const { isInitialized, isLoading, errorsInitializing } = vault.deposits[
-            name as AvailableNetworks
-        ];
+        const { isInitialized, isLoading, errorsInitializing } =
+            vault.deposits[name as AvailableNetworks];
 
         return { isImported, isInitialized, isLoading, errorsInitializing };
     }
@@ -301,7 +279,7 @@ export class TornadoService
             contract.contract
         );
 
-        const { name: network } = this._networkController.network;
+        const { name: network, chainId } = this._networkController.network;
 
         const depEv = await this._tornadoEventsDb.getDepositEventByCommitment(
             network as AvailableNetworks,
@@ -338,11 +316,12 @@ export class TornadoService
             contract.contract
         );
 
-        const withdrawEv = await this._tornadoEventsDb.getWithdrawalEventByNullifier(
-            network as AvailableNetworks,
-            deposit.pair,
-            parsedDeposit.nullifierHex
-        );
+        const withdrawEv =
+            await this._tornadoEventsDb.getWithdrawalEventByNullifier(
+                network as AvailableNetworks,
+                deposit.pair,
+                parsedDeposit.nullifierHex
+            );
 
         if (!withdrawEv) {
             // Deposit has not been withdrawn yet
@@ -350,9 +329,7 @@ export class TornadoService
         }
 
         // Get timestamp
-        const {
-            timestamp,
-        } = await this._networkController
+        const { timestamp } = await this._networkController
             .getProvider()
             .getBlock(withdrawEv.blockNumber);
 
@@ -361,7 +338,11 @@ export class TornadoService
             to: withdrawEv.to,
             transactionHash: withdrawEv.transactionHash,
             timestamp: new Date(timestamp * 1000),
-            fee: utils.formatEther(BigNumber.from(withdrawEv.fee)),
+            fee: utils.formatUnits(
+                BigNumber.from(withdrawEv.fee),
+                getTornadoTokenDecimals(chainId, deposit.pair)
+            ),
+            feeBN: BigNumber.from(withdrawEv.fee),
             nullifier: parsedDeposit.nullifierHex,
         };
 
@@ -391,13 +372,11 @@ export class TornadoService
             status: PendingWithdrawalStatus = pending.status,
             errMessage = '';
         try {
-            ({
-                txHash: transactionHash,
-                status,
-            } = await this.getStatusFromRelayerJob(
-                pending.jobId,
-                pending.relayerUrl
-            ));
+            ({ txHash: transactionHash, status } =
+                await this.getStatusFromRelayerJob(
+                    pending.jobId,
+                    pending.relayerUrl
+                ));
 
             // Update pending withdrawal to CONFIRMED
             await this.updatePendingWithdrawal(pending.pendingId, {
@@ -437,7 +416,10 @@ export class TornadoService
                 }
 
                 // Set as spent
-                await this.setSpent([deposit]);
+                await this._blankDepositVault.setSpent(
+                    [deposit],
+                    pending.chainId
+                );
             }
             return { txHash: transactionHash, status };
         } catch (error) {
@@ -480,11 +462,15 @@ export class TornadoService
             );
 
             if (unspentDeposits.length !== 0) {
-                const depositsNotesToUpdate = await this._notesService.updateUnspentNotes(
-                    unspentDeposits
-                );
+                const depositsNotesToUpdate =
+                    await this._notesService.updateUnspentNotes(
+                        unspentDeposits
+                    );
 
-                return this.setSpent(depositsNotesToUpdate);
+                return this._blankDepositVault.setSpent(
+                    depositsNotesToUpdate,
+                    this._networkController.network.chainId
+                );
             }
         } catch (error) {
             log.error('Error checking for possible spent notes');
@@ -557,9 +543,8 @@ export class TornadoService
                 chainId?: number;
             };
         };
-        const blankTransactionsMetas = this._transactionController.getBlankDepositTransactions(
-            chainId
-        );
+        const blankTransactionsMetas =
+            this._transactionController.getBlankDepositTransactions(chainId);
         blankTransactionsMetas.forEach((d, index) => {
             blankDepositsDict[d.blankDepositId!] = {
                 index,
@@ -578,7 +563,7 @@ export class TornadoService
                         blankDepositsDict[id].status
                     )
                 ) {
-                    await this.updateDepositStatus(
+                    await this._blankDepositVault.updateDepositStatus(
                         id,
                         blankDepositsDict[id].status ===
                             TransactionStatus.CONFIRMED
@@ -593,7 +578,7 @@ export class TornadoService
                 }
             } else {
                 // In case the transaction is not present for some reason, fail the deposit
-                await this.updateDepositStatus(
+                await this._blankDepositVault.updateDepositStatus(
                     id,
                     DepositStatus.FAILED,
                     chainId
@@ -637,7 +622,7 @@ export class TornadoService
      * @returns
      */
     public async initializeVault(unlockPhrase: string): Promise<void> {
-        return this._vault.initialize(unlockPhrase);
+        return this._blankDepositVault.initializeVault(unlockPhrase);
     }
 
     /**
@@ -646,7 +631,7 @@ export class TornadoService
      * @returns
      */
     public async reinitializeVault(unlockPhrase: string): Promise<void> {
-        return this._vault.reinitialize(unlockPhrase);
+        return this._blankDepositVault.reinitializeVault(unlockPhrase);
     }
 
     /**
@@ -670,7 +655,10 @@ export class TornadoService
             throw new Error('Current network is not supported');
         }
 
-        let fromBlockEvent = 0;
+        let fromBlockEvent =
+            tornadoDeployments[`netId${chainId}`].currencies[
+                currencyAmountPair.currency
+            ].instances[currencyAmountPair.amount].initialBlock;
         let fromIndexEvent = 0;
 
         if (!forceUpdate) {
@@ -717,7 +705,7 @@ export class TornadoService
         const events = await fetchPromise;
 
         if (events.length) {
-            return (Promise.all([
+            return Promise.all([
                 // Update events
                 this._tornadoEventsDb.updateEvents(
                     networkName as AvailableNetworks,
@@ -731,49 +719,34 @@ export class TornadoService
                     } as EventsUpdateType
                 ),
 
-                // Update last fetched block\
+                // Update last fetched block
                 this._tornadoEventsDb.updateLastQueriedBlock(
                     eventType,
                     networkName as AvailableNetworks,
                     currencyAmountPair,
-                    events.at(-1)!.blockNumber
+                    events[events.length - 1]!.blockNumber
                 ),
-            ]) as unknown) as Promise<void>;
+            ]) as unknown as Promise<void>;
         }
     };
 
     public getStore(): IObservableStore<BlankDepositControllerStoreState> {
-        return (this
-            ._composedStore as unknown) as IObservableStore<BlankDepositControllerStoreState>;
+        return this
+            ._composedStore as unknown as IObservableStore<BlankDepositControllerStoreState>;
     }
 
     /**
-     * It obtains from the vault the list of deposits from the current network
+     * It returns the list of deposits for the current or specified network
      */
     public async getDeposits(chainId?: number): Promise<IBlankDeposit[]> {
-        const network = chainId
-            ? this._networkController.getNetworkFromChainId(chainId)
-            : this._networkController.network;
-
-        if (!network) {
-            throw new Error('Invalid network chainId');
-        }
-
-        const { name } = network;
-
-        const vault = await this._vault.retrieve();
-        if (!name || !(name in vault.deposits)) {
-            throw new Error('Network not supported');
-        }
-
-        return vault.deposits[name as AvailableNetworks].deposits;
+        return this._blankDepositVault.getDeposits(chainId);
     }
 
     /**
      * Locks the vault to prevent decrypting and operating with it
      */
     public async lock(): Promise<void> {
-        await this._vault.lock();
+        await this._blankDepositVault.lock();
         return this._notesService.initRootPath();
     }
 
@@ -783,7 +756,7 @@ export class TornadoService
      */
     public async unlock(unlockPhrase: string, mnemonic: string): Promise<void> {
         // Unlock the vault
-        await this._vault.unlock(unlockPhrase);
+        await this._blankDepositVault.unlock(unlockPhrase);
 
         const { chainId, features } = this._networkController.network;
 
@@ -819,10 +792,16 @@ export class TornadoService
             .getResolver(proxy);
 
         if (!resolver) {
-            return proxy;
+            throw new Error('Unable to get resolver');
         }
 
-        return resolver.getAddress();
+        const address = await resolver.getAddress();
+
+        if (!address) {
+            throw new Error('Unable to get the address from the ENS');
+        }
+
+        return address;
     }
 
     /**
@@ -902,14 +881,12 @@ export class TornadoService
      * @param currencyAmountPair The currency/amount
      */
     private async getDepositsFromPair(currencyAmountPair: CurrencyAmountPair) {
-        const { deposits } = await this._vault.retrieve();
-        const { name } = this._networkController.network;
-
-        if (!name || !(name in deposits)) {
-            throw new Error('Invalid network');
-        }
-
-        const depositsForNetwork = deposits[name as AvailableNetworks].deposits;
+        const { deposits } = await this._blankDepositVault.getVault(
+            this._networkController.network.chainId
+        );
+        const depositsForNetwork =
+            deposits[this._networkController.network.name as AvailableNetworks]
+                .deposits;
 
         return depositsForNetwork.filter(
             (d) =>
@@ -1017,40 +994,37 @@ export class TornadoService
      * It sets the Tornado contract for the specific network
      * @param chainId The chainId
      */
-    private setTornadoContract = async (chainId: number) => {
-        for (const token of Object.keys(
-            (tornadoConfig.deployments as any)[`netId${chainId}`]
-        )) {
-            if (token === 'proxy') {
-                let proxy: string = (tornadoConfig.deployments as any)[
-                    `netId${chainId}`
-                ]['defaultProxy'];
-                try {
-                    proxy = await this.getProxyFromENS(
-                        (tornadoConfig.deployments as any)[`netId${chainId}`][
-                            'proxy'
-                        ]
-                    );
-                } catch (error) {
-                    log.debug(
-                        'Error resolving from proxy ENS. Defaulting to contained address'
-                    );
-                }
+    private setTornadoContract = async (
+        chainId: number,
+        ignoreENSProxy = true
+    ) => {
+        let proxy: string =
+            tornadoDeployments[`netId${chainId}`]['defaultProxy'];
 
-                this.proxyContract = new Contract(
-                    proxy,
-                    TornadoProxyAbi,
-                    this._networkController.getProvider()
-                ) as ITornadoContract;
-
-                continue;
-            } else if (token === 'defaultProxy') {
-                continue;
+        if (!ignoreENSProxy) {
+            try {
+                proxy = await this.getProxyFromENS(
+                    tornadoDeployments[`netId${chainId}`]['proxy']
+                );
+            } catch (error) {
+                log.debug(
+                    'Error resolving from proxy ENS. Defaulting to contained address'
+                );
             }
+        }
 
+        this.proxyContract = new Contract(
+            proxy,
+            TornadoProxyAbi,
+            this._networkController.getProvider()
+        ) as ITornadoContract;
+
+        for (const token of Object.keys(
+            tornadoDeployments[`netId${chainId}`].currencies
+        )) {
             for (const depositValue of Object.keys(
-                (tornadoConfig.deployments as any)[`netId${chainId}`][token]
-                    .instanceAddress
+                tornadoDeployments[`netId${chainId}`].currencies[token]
+                    .instances
             )) {
                 const depositCount = await this.getDepositCount({
                     currency: token as KnownCurrencies,
@@ -1059,18 +1033,18 @@ export class TornadoService
 
                 this.tornadoContracts.set(`${token}-${depositValue}`, {
                     contract: new Contract(
-                        (tornadoConfig.deployments as any)[`netId${chainId}`][
+                        tornadoDeployments[`netId${chainId}`].currencies[
                             token
-                        ].instanceAddress[depositValue],
+                        ].instances[depositValue].address,
                         MixerAbi,
                         this._networkController.getProvider()
                     ) as ITornadoContract,
-                    decimals: (tornadoConfig.deployments as any)[
-                        `netId${chainId}`
-                    ][token].decimals,
-                    tokenAddress: (tornadoConfig.deployments as any)[
-                        `netId${chainId}`
-                    ][token].tokenAddress,
+                    decimals:
+                        tornadoDeployments[`netId${chainId}`].currencies[token]
+                            .decimals,
+                    tokenAddress:
+                        tornadoDeployments[`netId${chainId}`].currencies[token]
+                            .tokenAddress,
                     depositCount,
                 });
             }
@@ -1106,274 +1080,11 @@ export class TornadoService
         }
     };
 
-    /**
-     * It drops a failed deposit
-     *
-     * @param depositId The deposit Id
-     * @param status The deposit new status
-     */
-    private dropFailedDeposit = async (depositId: string) => {
-        const { name } = this._networkController.network;
-
-        const { releaseMutexLock } = await this._vault.getVaultMutexLock();
-        try {
-            const currentDeposits = await this._vault.retrieve();
-            if (!name || !(name in currentDeposits.deposits))
-                throw new Error('Unsupported network');
-
-            const networkDeposits =
-                currentDeposits.deposits[name as AvailableNetworks];
-
-            const deposit = networkDeposits.deposits.find(
-                (d) => d.id === depositId
-            );
-            if (!deposit) {
-                throw new Error('Deposit not found');
-            }
-
-            if (deposit.status !== DepositStatus.FAILED) {
-                throw new Error('Can not drop a non failed deposit!');
-            }
-
-            const deposits = networkDeposits.deposits.filter(
-                (d) => d.id !== depositId
-            );
-
-            return this._vault.update({
-                deposits: {
-                    ...currentDeposits.deposits,
-                    [name as AvailableNetworks]: {
-                        ...networkDeposits,
-                        deposits: [...deposits],
-                    },
-                },
-            });
-        } finally {
-            releaseMutexLock();
-        }
-    };
-
-    /**
-     * It updates a deposit status
-     *
-     * @param depositId The deposit Id
-     * @param status The deposit new status
-     */
-    private updateDepositStatus = async (
-        depositId: string,
-        status: DepositStatus,
-        chainId?: number
-    ) => {
-        const { name } = chainId
-            ? this._networkController.getNetworkFromChainId(chainId)!
-            : this._networkController.network;
-
-        const { releaseMutexLock } = await this._vault.getVaultMutexLock();
-        try {
-            const currentDeposits = await this._vault.retrieve();
-            if (!name || !(name in currentDeposits.deposits))
-                throw new Error('Unsupported network');
-
-            const networkDeposits =
-                currentDeposits.deposits[name as AvailableNetworks];
-
-            const depositIndex = networkDeposits.deposits.findIndex(
-                (d) => d.id === depositId
-            );
-
-            if (depositIndex < 0)
-                throw new Error('The deposit is not present in the vault');
-
-            // Update spent and timestamp
-            networkDeposits.deposits[depositIndex].status = status;
-            networkDeposits.deposits[
-                depositIndex
-            ].timestamp = new Date().getTime();
-
-            return this._vault.update({
-                deposits: {
-                    ...currentDeposits.deposits,
-                    [name as AvailableNetworks]: {
-                        ...networkDeposits,
-                        deposits: [...networkDeposits.deposits],
-                    },
-                },
-            });
-        } finally {
-            releaseMutexLock();
-        }
-    };
-
-    /**
-     * setSpent
-     *
-     * It updates a Blank deposit to spent
-     *
-     * @param deposits The deposits
-     */
-    private async setSpent(deposits: IBlankDeposit[]) {
-        if (deposits.length === 0) {
-            return;
-        }
-
-        const { name } = deposits[0].chainId
-            ? this._networkController.getNetworkFromChainId(
-                  deposits[0].chainId
-              )!
-            : this._networkController.network;
-
-        const { releaseMutexLock } = await this._vault.getVaultMutexLock();
-        try {
-            const currentDeposits = await this._vault.retrieve();
-            if (!name || !(name in currentDeposits.deposits))
-                throw new Error('Unsupported network');
-
-            const networkDeposits =
-                currentDeposits.deposits[name as AvailableNetworks];
-
-            for (const deposit of deposits) {
-                const depositIndex = networkDeposits.deposits.findIndex(
-                    (d) => d.note === deposit.note
-                );
-
-                if (depositIndex < 0)
-                    throw new Error('A deposit is not present in the vault');
-
-                // Update spent and timestamp
-                networkDeposits.deposits[depositIndex].spent = true;
-                networkDeposits.deposits[
-                    depositIndex
-                ].timestamp = new Date().getTime();
-            }
-
-            return this._vault.update({
-                deposits: {
-                    ...currentDeposits.deposits,
-                    [name as AvailableNetworks]: {
-                        ...networkDeposits,
-                        deposits: [...networkDeposits.deposits],
-                    },
-                },
-            });
-        } finally {
-            releaseMutexLock();
-        }
-    }
-
-    /**
-     * addDeposits
-     *
-     * It adds a list of deposits to the vault
-     *
-     * @param deposits The list of recovered deposits
-     */
-    private async addDeposits(deposits: IBlankDeposit[]) {
-        const { name } = this._networkController.network;
-
-        const { releaseMutexLock } = await this._vault.getVaultMutexLock();
-        try {
-            const currentDeposits = await this._vault.retrieve();
-
-            if (!name || !(name in currentDeposits.deposits))
-                throw new Error('Unsupported network');
-
-            const networkDeposits =
-                currentDeposits.deposits[name as AvailableNetworks];
-
-            return this._vault.update({
-                deposits: {
-                    ...currentDeposits.deposits,
-                    [name as AvailableNetworks]: {
-                        ...networkDeposits,
-                        deposits: [...networkDeposits.deposits, ...deposits],
-                    },
-                },
-            });
-        } finally {
-            releaseMutexLock();
-        }
-    }
-
     public async importNotes(
         unlockPhrase?: string,
         mnemonic?: string
     ): Promise<void> {
-        // Vault lock to prevent other instances or network changes to use the vault while importing
-        const { releaseMutexLock } = await this._vault.getVaultMutexLock();
-        try {
-            // Set network deposits isLoading to true
-            const { name, chainId } = this._networkController.network;
-
-            if (unlockPhrase) {
-                await this._vault.unlock(unlockPhrase);
-            }
-
-            const currentDeposits = await this._vault.retrieve();
-
-            if (!name || !(name in currentDeposits.deposits))
-                throw new Error('Unsupported network');
-
-            const depositIsLoading =
-                currentDeposits.deposits[name as AvailableNetworks];
-            depositIsLoading.isLoading = true;
-            depositIsLoading.isInitialized = false;
-
-            this._vault.update({
-                deposits: {
-                    ...currentDeposits.deposits,
-                    [name as AvailableNetworks]: {
-                        ...depositIsLoading,
-                    },
-                },
-                isImported: true,
-            });
-
-            // Reconstruct deposits
-            const currentNetworkDepositsResult = await this._notesService.reconstruct(
-                mnemonic
-            );
-
-            // Add fulfilled promises only and push errors for rejected ones
-            let deposits: IBlankDeposit[] = [];
-            const errors: string[] = [];
-            for (const deposit of currentNetworkDepositsResult) {
-                if (deposit.status === 'fulfilled') {
-                    for (let i = 0; i < deposit.value.length; i++) {
-                        if (!deposit.value[i].chainId) {
-                            deposit.value[i].chainId = chainId;
-                        }
-                    }
-                    deposits = deposits.concat(deposit.value);
-                } else {
-                    errors.push(deposit.reason.message || deposit.reason);
-                }
-            }
-
-            // Get network current deposits
-            const networkCurrentDeposits =
-                currentDeposits.deposits[name as AvailableNetworks].deposits;
-
-            // Update vault with new deposits
-            const newDeposits: typeof currentDeposits.deposits = {
-                [name as AvailableNetworks]: {
-                    deposits: [...networkCurrentDeposits, ...deposits],
-                    isLoading: false,
-                    isInitialized: true,
-                    errorsInitializing: errors,
-                },
-            } as any;
-
-            return this._vault.update({
-                deposits: {
-                    ...currentDeposits.deposits,
-                    ...newDeposits,
-                },
-            });
-        } catch (error) {
-            log.error('Unexpected error while reconstructing user deposits');
-        } finally {
-            releaseMutexLock();
-        }
+        return this._notesService.importNotes(unlockPhrase, mnemonic);
     }
 
     /**
@@ -1425,11 +1136,8 @@ export class TornadoService
                     if (response.ok) {
                         const responseJson = await response.json();
                         if (response.status === 200) {
-                            const {
-                                txHash,
-                                status,
-                                failedReason,
-                            } = responseJson;
+                            const { txHash, status, failedReason } =
+                                responseJson;
 
                             if (status === PendingWithdrawalStatus.FAILED) {
                                 reject({
@@ -1473,16 +1181,12 @@ export class TornadoService
         deposit: IBlankDeposit,
         recipient: string
     ): Promise<string> {
-        const {
-            tornadoServiceFee,
-            rewardAccount,
-            relayerUrl,
-            ethPrices,
-        } = await this.getRelayerStatus();
+        const { tornadoServiceFee, rewardAccount, relayerUrl, ethPrices } =
+            await this.getRelayerStatus();
 
         // Calculate withdrawal gas cost & fees.
         // Relayer always uses fast gas price on legacy, we use maxFeePerGas for EIP1559
-        const gasPrices = this._gasPricesController.gasPrices();
+        const gasPrices = this._gasPricesController.getGasPricesLevels();
         const { fee, decimals } = this.calculateFeeAndTotal(
             deposit.pair,
             tornadoServiceFee,
@@ -1554,9 +1258,10 @@ export class TornadoService
 
         // Send transaction via relayer
         // (We must use the config file directly to prevent issues when changing network)
-        const contractAddress = (tornadoConfig.deployments as any)[
-            `netId${deposit.chainId}`
-        ][deposit.pair.currency].instanceAddress[deposit.pair.amount];
+        const contractAddress =
+            tornadoDeployments[`netId${deposit.chainId}`].currencies[
+                deposit.pair.currency
+            ].instances[deposit.pair.amount].address;
 
         // const contractKey = currencyAmountPairToMapKey(deposit.pair);
         // const contractAddress = this.tornadoContracts.get(contractKey)?.contract
@@ -1662,9 +1367,8 @@ export class TornadoService
         pendingWithdrawal: Partial<PendingWithdrawal>
     ) {
         // Lock store
-        const {
-            releaseMutexLock,
-        } = await this._pendingWithdrawalsStore.getStoreMutexLock();
+        const { releaseMutexLock } =
+            await this._pendingWithdrawalsStore.getStoreMutexLock();
 
         try {
             // At this point, chainId is always ensured.
@@ -1722,15 +1426,15 @@ export class TornadoService
         relayerUrl: string
     ) {
         // Lock store
-        const {
-            releaseMutexLock,
-        } = await this._pendingWithdrawalsStore.getStoreMutexLock();
+        const { releaseMutexLock } =
+            await this._pendingWithdrawalsStore.getStoreMutexLock();
 
         const { name, chainId } = this._networkController.network;
 
-        const pendingWithdrawals = this._pendingWithdrawalsStore.store.getState()[
-            name as AvailableNetworks
-        ];
+        const pendingWithdrawals =
+            this._pendingWithdrawalsStore.store.getState()[
+                name as AvailableNetworks
+            ];
 
         const pending: PendingWithdrawal = {
             pendingId: uuid(),
@@ -1761,9 +1465,7 @@ export class TornadoService
     /**
      * It returns the Withdrawal gas cost and fees using the FAST option (as the relayer does)
      */
-    public async getWithdrawalFees(
-        pair: CurrencyAmountPair
-    ): Promise<{
+    public async getWithdrawalFees(pair: CurrencyAmountPair): Promise<{
         relayerFee: BigNumber;
         gasFee: BigNumber;
         totalFee: BigNumber;
@@ -1773,7 +1475,7 @@ export class TornadoService
 
         // Calculate withdrawal gas cost & fees.
         // Relayer always uses fast gas price on legacy, we use maxFeePerGas for EIP1559
-        const gasPrices = this._gasPricesController.gasPrices();
+        const gasPrices = this._gasPricesController.getGasPricesLevels();
         const { fee, total, feePercent, gasCost } = this.calculateFeeAndTotal(
             pair,
             tornadoServiceFee,
@@ -1884,30 +1586,39 @@ export class TornadoService
     }
 
     public async populateDepositTransaction(
-        currencyAmountPair: CurrencyAmountPair
-    ): Promise<ethers.PopulatedTransaction> {
+        currencyAmountPair: CurrencyAmountPair,
+        chainId?: number
+    ): Promise<{
+        populatedTransaction: ethers.PopulatedTransaction;
+        nextDeposit: NextDepositResult['nextDeposit'];
+    }> {
         // Get next free deposit & possible recovered ones
-        const {
-            nextDeposit,
-            recoveredDeposits,
-        } = await this._notesService.getNextFreeDeposit(currencyAmountPair);
+        const { nextDeposit, recoveredDeposits } =
+            await this._notesService.getNextFreeDeposit(
+                currencyAmountPair,
+                false,
+                chainId
+            );
 
         if (recoveredDeposits) {
-            this.addDeposits(recoveredDeposits);
+            this._blankDepositVault.addDeposits(recoveredDeposits, chainId);
         }
 
         const depositTransaction = this.getDepositTransaction();
 
-        return depositTransaction.populateTransaction({
-            currencyAmountPair,
+        return {
+            populatedTransaction: await depositTransaction.populateTransaction({
+                currencyAmountPair,
+                nextDeposit,
+            } as DepositTransactionPopulatedTransactionParams),
             nextDeposit,
-        } as DepositTransactionPopulatedTransactionParams);
+        };
     }
 
     public async addAsNewDepositTransaction(
         currencyAmountPair: CurrencyAmountPair,
         populatedTransaction: ethers.PopulatedTransaction,
-        feeData: FeeData,
+        feeData: TransactionFeeData,
         approveUnlimited = false
     ): Promise<TransactionMeta> {
         const depositTransaction = this.getDepositTransaction();
@@ -1922,7 +1633,7 @@ export class TornadoService
 
     public async updateDepositTransactionGas(
         transactionId: string,
-        feeData: FeeData
+        feeData: TransactionFeeData
     ): Promise<void> {
         const depositTransaction = this.getDepositTransaction();
 
@@ -1931,12 +1642,13 @@ export class TornadoService
 
     public async approveDepositTransaction(
         transactionId: string,
-        currencyAmountPair?: CurrencyAmountPair
+        currencyAmountPair?: CurrencyAmountPair,
+        chainId: number = this._networkController.network.chainId,
+        nextDeposit?: NextDepositResult['nextDeposit']
     ): Promise<void> {
         // Obtain previously generated unsubmitted transaction
-        const transactionMeta = this._transactionController.getTransaction(
-            transactionId
-        );
+        const transactionMeta =
+            this._transactionController.getTransaction(transactionId);
 
         if (!transactionMeta) {
             throw new Error(`Deposit transaction (${transactionId}) not found`);
@@ -1951,35 +1663,31 @@ export class TornadoService
             );
         }
 
-        // Get network chainId
-        const { chainId } = this._networkController.network;
-
-        // Get next free deposit & possible recovered ones
-        const {
-            nextDeposit,
-            increment,
-        } = await this._notesService.getNextFreeDeposit(currencyAmountPair);
+        if (!nextDeposit) {
+            ({ nextDeposit } = await this._notesService.getNextFreeDeposit(
+                currencyAmountPair
+            ));
+        }
 
         // Add the deposit to the vault
-        await this.addDeposits([
-            {
-                id: transactionMeta.blankDepositId!,
-                note: nextDeposit.deposit.preImage.toString('hex'),
-                nullifierHex: nextDeposit.deposit.nullifierHex,
-                pair: nextDeposit.pair,
-                timestamp: new Date().getTime(),
-                spent: false,
-                depositAddress: this._preferencesController.getSelectedAddress(),
-                status: DepositStatus.PENDING,
-                depositIndex: nextDeposit.deposit.depositIndex,
-                chainId,
-            },
-        ]);
-
-        // Increment the nextDeposit derivation count if it's a new derivation
-        if (increment) {
-            increment();
-        }
+        await this._blankDepositVault.addDeposits(
+            [
+                {
+                    id: transactionMeta.blankDepositId!,
+                    note: nextDeposit.deposit.preImage.toString('hex'),
+                    nullifierHex: nextDeposit.deposit.nullifierHex,
+                    pair: nextDeposit.pair,
+                    timestamp: new Date().getTime(),
+                    spent: false,
+                    depositAddress:
+                        this._preferencesController.getSelectedAddress(),
+                    status: DepositStatus.PENDING,
+                    depositIndex: nextDeposit.deposit.depositIndex,
+                    chainId,
+                },
+            ],
+            chainId
+        );
 
         // Start processing pending deposit (If transactions fails on approving phase this will set the deposit to failed)
         this.processPendingDeposit(transactionMeta);
@@ -1999,13 +1707,16 @@ export class TornadoService
     }
 
     public async calculateDepositTransactionGasLimit(
-        currencyAmountPair: CurrencyAmountPair
+        currencyAmountPair: CurrencyAmountPair,
+        chainId = this._networkController.network.chainId
     ): Promise<TransactionGasEstimation> {
         const depositTransaction = this.getDepositTransaction();
 
         // Get next free deposit
         const { nextDeposit } = await this._notesService.getNextFreeDeposit(
-            currencyAmountPair
+            currencyAmountPair,
+            false,
+            chainId
         );
 
         return depositTransaction.calculateTransactionGasLimit({
@@ -2034,15 +1745,18 @@ export class TornadoService
 
     public async deposit(
         currencyAmountPair: CurrencyAmountPair,
-        feeData: FeeData,
+        feeData: TransactionFeeData,
         approveUnlimited = false
     ): Promise<string> {
         // Lock on deposit generation to prevent race condition on keys derivation
         const releaseLock = await this._depositLock.acquire();
         try {
-            const populatedTransaction = await this.populateDepositTransaction(
-                currencyAmountPair
-            );
+            const { chainId } = this._networkController.network;
+            const { populatedTransaction, nextDeposit } =
+                await this.populateDepositTransaction(
+                    currencyAmountPair,
+                    chainId
+                );
 
             const transactionMeta = await this.addAsNewDepositTransaction(
                 currencyAmountPair,
@@ -2053,7 +1767,9 @@ export class TornadoService
 
             await this.approveDepositTransaction(
                 transactionMeta.id,
-                currencyAmountPair
+                currencyAmountPair,
+                chainId,
+                nextDeposit
             );
 
             return this.getDepositTransactionResult(transactionMeta.id);
@@ -2103,7 +1819,7 @@ export class TornadoService
         // Update deposit state only if vault is still unlocked
         // && network is still the same
         if (this.isUnlocked) {
-            return this.updateDepositStatus(
+            return this._blankDepositVault.updateDepositStatus(
                 meta.blankDepositId,
                 depositStatus,
                 meta.chainId

@@ -1,18 +1,35 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { BlankAppState } from '@blank/background/utils/constants/initialState';
-import { INITIAL_NETWORKS } from '../../../../utils/constants/networks';
 import { IMigration } from '../IMigration';
 
 export default {
     migrate: async (persistedState: BlankAppState) => {
+        const updateObj: {
+            blockData: {
+                [chainId: number]: {
+                    blockNumber: number;
+                    updateCounter: number;
+                };
+            };
+        } = { blockData: {} };
+
+        Object.keys(persistedState.BlockUpdatesController.blockData).reduce(
+            (_, cv) => {
+                updateObj.blockData[Number(cv)] = {
+                    blockNumber: persistedState.BlockUpdatesController
+                        .blockData[Number(cv)] as any,
+                    updateCounter: 0,
+                };
+                return '';
+            },
+            ''
+        );
+
         return {
             ...persistedState,
-            PreferencesController: {
-                ...persistedState.PreferencesController,
-                showTestNetworks: true,
-                availableNetworks: INITIAL_NETWORKS,
-            },
+            BlockUpdatesController: { ...updateObj },
         };
     },
     // Migration version must match new bumped package.json version
-    version: '0.1.5',
+    version: '0.1.7',
 } as IMigration;

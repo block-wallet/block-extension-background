@@ -12,10 +12,20 @@ import { ContractMethodSignature } from '../SignatureRegistry';
 
 export type TransactionParams = Partial<Transaction>;
 
+/**
+ * The meta type of the transaction.
+ * - `REGULAR`: A classic transaction
+ * - `CANCEL`: A transaction sent to cancel another one
+ * - `CANCELLING`: A transaction that we try to cancel
+ * - `SPEED_UP`: A transaction sent to speed up another one
+ * - `SPEEDING_UP`: A transaction that we try to speed up
+ */
 export enum MetaType {
     REGULAR = 'REGULAR',
     CANCEL = 'CANCEL',
+    CANCELLING = 'CANCELLING',
     SPEED_UP = 'SPEED_UP',
+    SPEEDING_UP = 'SPEEDING_UP',
 }
 
 /**
@@ -34,6 +44,11 @@ export interface TransactionMeta {
      */
     blocksDropCount: number;
 
+    /**
+     * If the transaction should be submitted to the flashbots endpoint, to circumvent the public mempool
+     */
+    flashbots?: boolean;
+
     confirmationTime?: number;
     chainId?: number;
     transactionParams: TransactionParams;
@@ -41,7 +56,7 @@ export interface TransactionMeta {
     transactionCategory?: TransactionCategories;
     methodSignature?: ContractMethodSignature;
     transferType?: TransferType;
-    metaType?: MetaType;
+    metaType: MetaType;
     loadingGasValues: boolean;
     depositPair?: CurrencyAmountPair;
     blankDepositId?: string;
@@ -123,4 +138,12 @@ export enum TransactionType {
     LEGACY = 0,
     ACCESS_LIST_EIP2930 = 1,
     FEE_MARKET_EIP1559 = 2,
+}
+
+/**
+ * Transaction params that can be setted by the user using the Advance Settings popup.
+ */
+export interface TransactionAdvancedData {
+    customNonce?: number
+    flashbots?: boolean
 }

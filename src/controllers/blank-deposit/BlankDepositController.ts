@@ -27,13 +27,14 @@ import { TokenController } from '../erc-20/TokenController';
 import { TokenOperationsController } from '../erc-20/transactions/Transaction';
 import { TransactionMeta } from '../transactions/utils/types';
 import { Mutex } from 'async-mutex';
-import { FeeData, GasPricesController } from '../GasPricesController';
+import { GasPricesController } from '../GasPricesController';
 import { FEATURES } from '../../utils/constants/features';
 import log from 'loglevel';
-import BlockUpdatesController from '../BlockUpdatesController';
 import { TornadoEventsService } from './tornado/TornadoEventsService';
 import { IObservableStore } from '@blank/background/infrastructure/stores/ObservableStore';
 import { showBlankContractNotification } from '../../utils/notifications';
+import { TransactionFeeData } from '../erc-20/transactions/SignedTransaction';
+import { NextDepositResult } from './notes/INotesService';
 
 export enum PendingWithdrawalStatus {
     UNSUBMITTED = 'UNSUBMITTED',
@@ -93,6 +94,8 @@ export interface BlankDepositControllerUIStoreState {
     };
     isVaultInitialized: boolean;
     isImportingDeposits: boolean;
+    areDepositsPending: boolean;
+    areWithdrawalsPending: boolean;
     importingErrors: string[];
 }
 
@@ -103,7 +106,6 @@ export interface BlankDepositControllerProps {
     tokenOperationsController: TokenOperationsController;
     preferencesController: PreferencesController;
     gasPricesController: GasPricesController;
-    blockUpdatesController: BlockUpdatesController;
     tornadoEventsService: TornadoEventsService;
     initialState: BlankDepositControllerStoreState;
 }
@@ -139,7 +141,6 @@ export class BlankDepositController extends BaseController<
             gasPricesController: props.gasPricesController,
             tokenOperationsController: props.tokenOperationsController,
             tokenController: props.tokenController,
-            blockUpdatesController: props.blockUpdatesController,
             tornadoEventsService: props.tornadoEventsService,
             initialState: props.initialState,
         });
@@ -316,6 +317,8 @@ export class BlankDepositController extends BaseController<
                 isVaultInitialized: undefined,
                 isImportingDeposits: undefined,
                 importingErrors: [],
+                areDepositsPending: false,
+                areWithdrawalsPending: false,
             });
             return;
         }
@@ -335,20 +338,27 @@ export class BlankDepositController extends BaseController<
         };
 
         // Get importing status
-        const {
-            isInitialized,
-            isLoading,
-            errorsInitializing,
-        } = await this._blankDepositService.getImportingStatus();
+        const { isInitialized, isLoading, errorsInitializing } =
+            await this._blankDepositService.getImportingStatus();
 
-        const depositsCount = (await this._blankDepositService.getUnspentDepositCount()) as {
-            [key in KnownCurrencies]: {
-                pair: CurrencyAmountPair;
-                count: number;
-            }[];
-        };
+        const depositsCount =
+            (await this._blankDepositService.getUnspentDepositCount()) as {
+                [key in KnownCurrencies]: {
+                    pair: CurrencyAmountPair;
+                    count: number;
+                }[];
+            };
 
-        const pendingDeposits = await this.getDepositingStatus();
+        const { pendingDeposits, areDepositsPending } =
+            await this.getDepositingStatus();
+
+        const areWithdrawalsPending =
+            pendingWithdrawals.filter(
+                (v) =>
+                    v.status === PendingWithdrawalStatus.UNSUBMITTED ||
+                    v.status === PendingWithdrawalStatus.PENDING ||
+                    v.status === PendingWithdrawalStatus.MINED
+            ).length > 0;
 
         // Update mem store
         this.UIStore.updateState({
@@ -356,6 +366,8 @@ export class BlankDepositController extends BaseController<
             pendingDeposits,
             depositsCount,
             pendingWithdrawals,
+            areDepositsPending,
+            areWithdrawalsPending,
             isVaultInitialized: isInitialized,
             isImportingDeposits: isLoading,
             importingErrors: errorsInitializing,
@@ -365,14 +377,18 @@ export class BlankDepositController extends BaseController<
     /**
      * It return whether there are pending deposits for the pair
      */
-    public async getDepositingStatus(): Promise<
-        BlankDepositControllerUIStoreState['pendingDeposits']
-    > {
+    public async getDepositingStatus(): Promise<{
+        pendingDeposits: BlankDepositControllerUIStoreState['pendingDeposits'];
+        areDepositsPending: boolean;
+    }> {
         const deposits = (await this._blankDepositService.getDeposits()).filter(
             (d) => d.status === DepositStatus.PENDING
         );
 
-        const values = {} as BlankDepositControllerUIStoreState['pendingDeposits'];
+        const areDepositsPending = deposits.length !== 0;
+
+        const values =
+            {} as BlankDepositControllerUIStoreState['pendingDeposits'];
 
         for (const [currency, amountList] of Object.entries(
             CurrencyAmountArray
@@ -380,16 +396,16 @@ export class BlankDepositController extends BaseController<
             values[currency as KnownCurrencies] = {} as any;
             amountList.forEach(
                 (a: any) =>
-                    ((values[currency as KnownCurrencies] as any)[
-                        a
-                    ] = !!deposits.find(
-                        (f) =>
-                            f.pair.amount === a && f.pair.currency === currency
-                    ))
+                    ((values[currency as KnownCurrencies] as any)[a] =
+                        !!deposits.find(
+                            (f) =>
+                                f.pair.amount === a &&
+                                f.pair.currency === currency
+                        ))
             );
         }
 
-        return values;
+        return { pendingDeposits: values, areDepositsPending };
     }
 
     /**
@@ -532,9 +548,7 @@ export class BlankDepositController extends BaseController<
      *
      * @param currency The currency to look for
      */
-    public async getCurrencyDepositsCount(
-        currency: KnownCurrencies
-    ): Promise<
+    public async getCurrencyDepositsCount(currency: KnownCurrencies): Promise<
         {
             pair: CurrencyAmountPair;
             count: number;
@@ -588,7 +602,7 @@ export class BlankDepositController extends BaseController<
      */
     public async deposit(
         currencyAmountPair: CurrencyAmountPair,
-        feeData: FeeData,
+        feeData: TransactionFeeData,
         unlimitedAllowance = false
     ): Promise<string> {
         return this._blankDepositService.deposit(
@@ -604,9 +618,13 @@ export class BlankDepositController extends BaseController<
      */
     public async populateDepositTransaction(
         currencyAmountPair: CurrencyAmountPair
-    ): Promise<ethers.PopulatedTransaction> {
+    ): Promise<{
+        populatedTransaction: ethers.PopulatedTransaction;
+        nextDeposit: NextDepositResult['nextDeposit'];
+    }> {
         return this._blankDepositService.populateDepositTransaction(
-            currencyAmountPair
+            currencyAmountPair,
+            this._networkController.network.chainId
         );
     }
 
@@ -618,10 +636,10 @@ export class BlankDepositController extends BaseController<
      */
     public async addAsNewDepositTransaction(
         currencyAmountPair: CurrencyAmountPair,
-        feeData: FeeData,
+        feeData: TransactionFeeData,
         unlimitedAllowance = false
     ): Promise<TransactionMeta> {
-        const populatedTransaction = await this.populateDepositTransaction(
+        const { populatedTransaction } = await this.populateDepositTransaction(
             currencyAmountPair
         );
 
@@ -640,7 +658,7 @@ export class BlankDepositController extends BaseController<
      */
     public async updateDepositTransactionGas(
         transactionId: string,
-        feeData: FeeData
+        feeData: TransactionFeeData
     ): Promise<void> {
         return this._blankDepositService.updateDepositTransactionGas(
             transactionId,
@@ -712,9 +730,7 @@ export class BlankDepositController extends BaseController<
      * It returns the Withdrawal gas cost and fees
      * @param pair The currency/amount pair
      */
-    public async getWithdrawalFees(
-        pair: CurrencyAmountPair
-    ): Promise<{
+    public async getWithdrawalFees(pair: CurrencyAmountPair): Promise<{
         totalFee: BigNumber;
         relayerFee: BigNumber;
         gasFee: BigNumber;

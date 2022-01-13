@@ -18,6 +18,8 @@ import {
     WatchAssetReq,
     DappRequestConfirmOptions,
     WatchAssetConfirmParams,
+    SubscriptionParams,
+    SubcriptionResult,
 } from '../utils/types/ethereum';
 import { v4 as uuid } from 'uuid';
 import { BaseController } from '../infrastructure/BaseController';
@@ -27,6 +29,7 @@ import {
     RequestArguments,
     ProviderSetupData,
     ChainChangedInfo,
+    EthSubscription,
 } from '@blank/provider/types';
 import { isEmpty } from 'lodash';
 import AppStateController, {
@@ -61,11 +64,14 @@ import { TokenController } from './erc-20/TokenController';
 import { Token } from './erc-20/Token';
 import { validateChainId } from '../utils/ethereumChain';
 import log from 'loglevel';
-import BlockUpdatesController from './BlockUpdatesController';
 import KeyringControllerDerivated from './KeyringControllerDerivated';
 
 export enum BlankProviderEvents {
     SUBSCRIPTION_UPDATE = 'SUBSCRIPTION_UPDATE',
+}
+
+interface ActiveSubscriptions {
+    [id: string]: { id: string; portId: string };
 }
 
 export interface BlankProviderControllerState {
@@ -79,6 +85,7 @@ export interface BlankProviderControllerState {
 export default class BlankProviderController extends BaseController<BlankProviderControllerState> {
     private _unlockHandlers: Handler[];
     private _requestHandlers: Handlers;
+    private _activeSubscriptions: ActiveSubscriptions;
 
     constructor(
         private readonly _networkController: NetworkController,
@@ -86,27 +93,50 @@ export default class BlankProviderController extends BaseController<BlankProvide
         private readonly _permissionsController: PermissionsController,
         private readonly _appStateController: AppStateController,
         private readonly _keyringController: KeyringControllerDerivated,
-        private readonly _tokenController: TokenController,
-        private readonly _blockUpdatesController: BlockUpdatesController
+        private readonly _tokenController: TokenController
     ) {
         super({ dappRequests: {} });
 
         this._unlockHandlers = [];
         this._requestHandlers = {};
+        this._activeSubscriptions = {};
 
-        /**
-         * Emit the event when the chain is changed
-         * Needed to comply with: EIP1193 https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1193.md
-         */
+        // Network change updates
         this._networkController.on(
             NetworkEvents.NETWORK_CHANGE,
             async ({ chainId }: Network) => {
                 const networkVersion = await this._getNetworkVersion();
 
+                // Emit network change event
+                // Needed to comply with: EIP1193 https://github.com/ethereum/EIPs/blob/master/EIPS/eip-1193.md
                 this._emitChainChanged({
                     chainId: hexValue(chainId),
                     networkVersion,
                 });
+
+                // Remove existing subscriptions
+                this._activeSubscriptions = {};
+            }
+        );
+
+        // Listen to web socket provider messages
+        this._networkController.on(
+            NetworkEvents.WS_PROVIDER_MESSAGE,
+            (result: SubcriptionResult) => {
+                if (result.method === 'eth_subscription') {
+                    const subId = result.params.subscription;
+
+                    // Get active sub
+                    const activeSubscription = this._activeSubscriptions[subId];
+
+                    if (activeSubscription) {
+                        this._handleSubscriptionResponse(
+                            activeSubscription.portId,
+                            subId,
+                            result.params.result
+                        );
+                    }
+                }
             }
         );
 
@@ -142,7 +172,7 @@ export default class BlankProviderController extends BaseController<BlankProvide
 
         const networkVersion = await this._getNetworkVersion();
 
-        const accounts = this._getAccounts(providerInstances[portId]);
+        const accounts = this._accountsRequest(providerInstances[portId]);
 
         return {
             accounts,
@@ -178,7 +208,7 @@ export default class BlankProviderController extends BaseController<BlankProvide
             throw new Error(`No data has been found for provider ${portId}`);
         }
 
-        eventData.payload = this._getAccounts(providerInstances[portId]);
+        eventData.payload = this._accountsRequest(providerInstances[portId]);
 
         return eventData;
     };
@@ -233,50 +263,9 @@ export default class BlankProviderController extends BaseController<BlankProvide
 
         switch (method) {
             case JSONRPCMethod.eth_accounts:
-                return this._accountsRequest(instanceData);
+                return this._accountsRequest(instanceData, true);
             case JSONRPCMethod.eth_chainId:
                 return this._getChainId();
-            case JSONRPCMethod.eth_requestAccounts:
-                return this._connectionRequest(instanceData);
-            case JSONRPCMethod.eth_sendTransaction:
-                return this._handleSendTransaction(
-                    params as [TransactionRequest],
-                    instanceData
-                );
-            case JSONRPCMethod.wallet_getPermissions:
-                return this._handleGetPermissions(instanceData);
-            case JSONRPCMethod.wallet_requestPermissions:
-                return this._handleWalletRequestPermissions(
-                    params as Record<string, unknown>[],
-                    instanceData
-                );
-            case JSONRPCMethod.wallet_addEthereumChain:
-                return this._handleAddEthereumChain(
-                    params as [AddEthereumChainParameter],
-                    instanceData
-                );
-            case JSONRPCMethod.wallet_switchEthereumChain:
-                return this._handleSwitchEthereumChain(
-                    params as [SwitchEthereumChainParameters],
-                    instanceData
-                );
-            case JSONRPCMethod.eth_signTypedData:
-            case JSONRPCMethod.eth_signTypedData_v1:
-            case JSONRPCMethod.eth_signTypedData_v3:
-            case JSONRPCMethod.eth_signTypedData_v4:
-            case JSONRPCMethod.personal_sign:
-                return this._handleMessageSigning(
-                    method,
-                    params as RawSignatureData[SignatureTypes],
-                    instanceData
-                );
-            case JSONRPCMethod.wallet_watchAsset:
-                return this._handleWalletWatchAsset(
-                    params as unknown as WatchAssetParameters,
-                    instanceData
-                );
-            case JSONRPCMethod.web3_sha3:
-                return this._sha3(params);
             case JSONRPCMethod.eth_getCode:
                 if (params) {
                     if (
@@ -293,6 +282,54 @@ export default class BlankProviderController extends BaseController<BlankProvide
                 return this._networkController
                     .getProvider()
                     .send(method, params as unknown[]);
+            case JSONRPCMethod.eth_requestAccounts:
+                return this._connectionRequest(instanceData);
+            case JSONRPCMethod.eth_sendTransaction:
+                return this._handleSendTransaction(
+                    params as [TransactionRequest],
+                    instanceData
+                );
+            case JSONRPCMethod.eth_signTypedData:
+            case JSONRPCMethod.eth_signTypedData_v1:
+            case JSONRPCMethod.eth_signTypedData_v3:
+            case JSONRPCMethod.eth_signTypedData_v4:
+            case JSONRPCMethod.personal_sign:
+                return this._handleMessageSigning(
+                    method,
+                    params as RawSignatureData[SignatureTypes],
+                    instanceData
+                );
+            case JSONRPCMethod.eth_subscribe:
+                return this._createSubscription(
+                    params as unknown as SubscriptionParams,
+                    portId
+                );
+            case JSONRPCMethod.eth_unsubscribe:
+                return this._handleUnsubscribe(params as string[]);
+            case JSONRPCMethod.wallet_addEthereumChain:
+                return this._handleAddEthereumChain(
+                    params as [AddEthereumChainParameter],
+                    instanceData
+                );
+            case JSONRPCMethod.wallet_getPermissions:
+                return this._handleGetPermissions(instanceData);
+            case JSONRPCMethod.wallet_requestPermissions:
+                return this._handleWalletRequestPermissions(
+                    params as Record<string, unknown>[],
+                    instanceData
+                );
+            case JSONRPCMethod.wallet_switchEthereumChain:
+                return this._handleSwitchEthereumChain(
+                    params as [SwitchEthereumChainParameters],
+                    instanceData
+                );
+            case JSONRPCMethod.wallet_watchAsset:
+                return this._handleWalletWatchAsset(
+                    params as unknown as WatchAssetParameters,
+                    instanceData
+                );
+            case JSONRPCMethod.web3_sha3:
+                return this._sha3(params);
             default:
                 // If it's a standard json rpc request, forward it to the provider
                 if (ExtProviderMethods.includes(method)) {
@@ -325,83 +362,6 @@ export default class BlankProviderController extends BaseController<BlankProvide
     };
 
     /**
-     * Internal method to handle eth_requestAccounts
-     *
-     */
-    private _connectionRequest = async ({
-        origin,
-        siteMetadata,
-    }: ProviderInstance): Promise<string[]> => {
-        const permissions =
-            this._permissionsController.getSitePermissions(origin);
-
-        if (!permissions) {
-            const permissionRequest =
-                await this._permissionsController.connectionRequest(
-                    origin,
-                    siteMetadata
-                );
-
-            return permissionRequest;
-        }
-
-        // Check if app is locked
-        const isAppUnlocked =
-            this._appStateController.UIStore.getState().isAppUnlocked;
-
-        if (!isAppUnlocked) {
-            await this._waitForUnlock();
-        }
-
-        // Update accounts on provider
-        this._emitAccountsChanged();
-
-        // Return active account
-        return [permissions.activeAccount];
-    };
-
-    /**
-     * Private method to handle eth_accounts
-     *
-     * @param providerInstance
-     */
-    private _accountsRequest = (
-        { origin }: ProviderInstance,
-        emitUpdate = true
-    ) => {
-        // Check if app is locked
-        const isAppUnlocked =
-            this._appStateController.UIStore.getState().isAppUnlocked;
-
-        if (!isAppUnlocked) {
-            return [];
-        }
-
-        if (emitUpdate) {
-            this._emitAccountsChanged();
-        }
-
-        return this._permissionsController.getAccounts(origin);
-    };
-
-    /**
-     * Private method to fetch permissions for a certain origin
-     *
-     * @param providerInstance
-     */
-    private _getAccounts = ({ origin }: ProviderInstance) => {
-        // Check if app is locked
-        const isAppUnlocked =
-            this._appStateController.UIStore.getState().isAppUnlocked;
-
-        if (!isAppUnlocked) {
-            return [];
-        }
-
-        return this._permissionsController.getAccounts(origin);
-    };
-
-    /**
      * Internal method to apply keccak256 function to given data eth_sha3
      *
      * @dev Ethereum incorrectly refers to keccak256 function as sha3 (legacy mistake)
@@ -421,7 +381,6 @@ export default class BlankProviderController extends BaseController<BlankProvide
 
     /**
      * Returns current provider chain id
-     *
      */
     private _getChainId = async (): Promise<string> => {
         // We must use network stored chainId due to security implications.
@@ -433,12 +392,130 @@ export default class BlankProviderController extends BaseController<BlankProvide
 
     /**
      * Returns the current network version
-     *
      */
     private _getNetworkVersion = async (): Promise<string> => {
         const { networkVersion } = this._networkController.network;
 
         return networkVersion;
+    };
+
+    //=============================================================================
+    // SUBSCRIPTIONS
+    //=============================================================================
+
+    /**
+     * eth_subscribe handler
+     * Creates a new subscription, returns the subscription ID to the dapp.
+     */
+    private _createSubscription = async (
+        params: SubscriptionParams,
+        portId: string
+    ): Promise<string> => {
+        // Get web socket provider
+        const wsProvider = await this._networkController.getWebSocketProvider(
+            true
+        );
+
+        if (!wsProvider) {
+            throw new Error(ProviderError.RESOURCE_UNAVAILABLE);
+        }
+
+        // Get subscription id
+        const subscriptionId = (await wsProvider.send(
+            JSONRPCMethod.eth_subscribe,
+            params
+        )) as string;
+
+        // Add to active subscriptions
+        this._activeSubscriptions[subscriptionId] = {
+            id: subscriptionId,
+            portId,
+        };
+
+        return subscriptionId;
+    };
+
+    /**
+     * Method to handle eth_unsubscribe
+     */
+    private _handleUnsubscribe = async (
+        params: string[]
+    ): Promise<void | boolean> => {
+        const subscriptionId = params[0];
+        const wsProvider = await this._networkController.getWebSocketProvider();
+
+        // Remove subscription handler
+        delete this._activeSubscriptions[subscriptionId];
+
+        // Unsubscribe
+        if (wsProvider) {
+            const res: boolean = await wsProvider.send(
+                JSONRPCMethod.eth_unsubscribe,
+                params
+            );
+
+            if (isEmpty(this._activeSubscriptions)) {
+                this._networkController.terminateWebSocket();
+            }
+
+            return res;
+        }
+    };
+
+    //=============================================================================
+    // ACCOUNTS AND PERMISSIONS
+    //=============================================================================
+
+    /**
+     * Internal method to handle eth_requestAccounts
+     *
+     */
+    private _connectionRequest = async ({
+        origin,
+        siteMetadata,
+    }: ProviderInstance): Promise<string[]> => {
+        const permissions = await this._permissionsController.connectionRequest(
+            origin,
+            siteMetadata
+        );
+
+        // Trigger unlock before returning accounts
+        // Just in case permissions were already granted
+        const isUnlocked = await this._waitForUnlock();
+        if (!isUnlocked) {
+            return [];
+        }
+
+        // Update accounts on provider
+        this._emitAccountsChanged();
+
+        // Return active account
+        return permissions;
+    };
+
+    /**
+     * Get accounts with permissions to interact with the given provider instance origin.
+     *
+     * @param providerInstance Current provider instance data.
+     * @param emitUpdate If true the accounts change event will be emitted.
+     */
+    private _accountsRequest = (
+        { origin }: ProviderInstance,
+        emitUpdate = false
+    ) => {
+        // Check if app is locked
+        const isAppUnlocked =
+            this._appStateController.UIStore.getState().isAppUnlocked;
+
+        if (!isAppUnlocked) {
+            return [];
+        }
+
+        if (emitUpdate) {
+            this._emitAccountsChanged();
+        }
+
+        return this._permissionsController.getAccounts(origin);
     };
 
     /**
@@ -466,7 +543,7 @@ export default class BlankProviderController extends BaseController<BlankProvide
      *
      */
     private _handleGetPermissions = (providerInstance: ProviderInstance) => {
-        const accounts = this._accountsRequest(providerInstance);
+        const accounts = this._accountsRequest(providerInstance, true);
 
         if (accounts.length < 1) {
             return { invoker: origin };
@@ -489,6 +566,10 @@ export default class BlankProviderController extends BaseController<BlankProvide
             ],
         };
     };
+
+    //=============================================================================
+    // DAPP REQUESTS
+    //=============================================================================
 
     private _handleAddEthereumChain = async (
         params: [AddEthereumChainParameter],
@@ -519,6 +600,17 @@ export default class BlankProviderController extends BaseController<BlankProvide
         params: [SwitchEthereumChainParameters],
         instance: ProviderInstance
     ) => {
+        // Throw if there's already a request to switch networks from that origin
+        const currentRequests = { ...this.store.getState().dappRequests };
+        Object.values(currentRequests).forEach((req) => {
+            if (
+                req.type === DappReq.SWITCH_NETWORK &&
+                req.origin === instance.origin
+            ) {
+                throw new Error(ProviderError.RESOURCE_UNAVAILABLE);
+            }
+        });
+
         const chainId = params[0].chainId;
 
         // Validate and normalize switchEthereumChain params
@@ -584,19 +676,21 @@ export default class BlankProviderController extends BaseController<BlankProvide
         params: RawSignatureData[TSignatureType],
         instance: ProviderInstance
     ) => {
-        // Get permissions
-        const permissions = this._accountsRequest(instance, false);
-
         // Get chain id
         const chainId = await this._getChainId();
 
-        // Validate and standarize signature params
-        const normalizedParams = validateSignature(
-            method,
-            params,
-            permissions,
-            chainId
+        // Validate and standardize signature params
+        const normalizedParams = validateSignature(method, params, chainId);
+
+        // Check if the account has permissions
+        const hasPermission = this._permissionsController.accountHasPermissions(
+            instance.origin,
+            normalizedParams.address
         );
+        if (!hasPermission) {
+            log.debug('Account has no permissions');
+            throw new Error(ProviderError.UNAUTHORIZED);
+        }
 
         // Submit request
         const { isAccepted, reqId } = await this._submitDappRequest(
@@ -645,6 +739,7 @@ export default class BlankProviderController extends BaseController<BlankProvide
         params: WatchAssetParameters,
         instance: ProviderInstance
     ): Promise<boolean> => {
+        const { chainId } = this._networkController.network;
         let isUpdate = false;
         let savedToken: WatchAssetReq['params'] | undefined;
 
@@ -669,23 +764,17 @@ export default class BlankProviderController extends BaseController<BlankProvide
             }
         });
 
-        // Validate permissions
-        const sitePermissions = this._permissionsController.getAccounts(
-            instance.origin
-        );
-        if (sitePermissions.length < 1) {
-            // Site has no permissions to operate with this address
-            throw new Error(ProviderError.UNAUTHORIZED);
-        }
-
-        // Define current active address
-        const accountAddress = sitePermissions[0];
+        // Get active account (if any)
+        const activeAccount: string | undefined =
+            this._permissionsController.getAccounts(instance.origin)[0];
 
         // Check if token already exists on user profile
         const tokenSearchResult = await this._tokenController.search(
             validParams.address,
             false,
-            accountAddress
+            activeAccount,
+            chainId,
+            true
         );
 
         if (
@@ -710,7 +799,7 @@ export default class BlankProviderController extends BaseController<BlankProvide
         const { isAccepted, reqId, confirmOptions } =
             await this._submitDappRequest(
                 DappReq.ASSET,
-                { params: validParams, accountAddress, isUpdate, savedToken },
+                { params: validParams, activeAccount, isUpdate, savedToken },
                 instance.origin,
                 instance.siteMetadata
             );
@@ -732,7 +821,7 @@ export default class BlankProviderController extends BaseController<BlankProvide
                         'ERC20',
                         updatedParams.image
                     ),
-                    accountAddress
+                    activeAccount
                 );
 
                 return true;
@@ -860,6 +949,31 @@ export default class BlankProviderController extends BaseController<BlankProvide
         });
     };
 
+    /**
+     * Internal method to emit message event (for subscriptions)
+     *
+     * @param portId to which port is this message directed
+     * @param subscriptionId provider given subscription id
+     * @param payload data.result from subscription
+     */
+    private _handleSubscriptionResponse = (
+        portId: string,
+        subscriptionId: string,
+        payload: Record<string, unknown>
+    ) => {
+        this._updateEventSubscriptions({
+            eventName: ProviderEvents.message,
+            payload: {
+                type: 'eth_subscription',
+                data: {
+                    subscription: subscriptionId,
+                    result: payload,
+                },
+            } as EthSubscription,
+            portId,
+        });
+    };
+
     //=============================================================================
     // WINDOW MANAGEMENT
     //=============================================================================
@@ -910,10 +1024,6 @@ export default class BlankProviderController extends BaseController<BlankProvide
         TRANSACTIONS: (
             transactionsState: TransactionVolatileControllerState
         ) => {
-            if (!this._appStateController.UIStore.getState().isAppUnlocked) {
-                return;
-            }
-
             if (!isEmpty(transactionsState.unapprovedTransactions)) {
                 openPopup();
             } else {
@@ -978,6 +1088,10 @@ export default class BlankProviderController extends BaseController<BlankProvide
      */
     private _waitForUnlock = (): Promise<boolean> => {
         return new Promise((resolve, reject) => {
+            if (this._appStateController.UIStore.getState().isAppUnlocked) {
+                return resolve(true);
+            }
+
             // Add handler
             this._unlockHandlers.push({ reject, resolve });
 

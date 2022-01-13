@@ -193,6 +193,24 @@ const get = async <T>(url: string): Promise<T> => {
         };
     });
 
+    // tokens to exclude due to e.g. spam
+    const excludedTokens = {
+        // bsc
+        56: [
+            '0x5CA42204cDaa70d5c773946e69dE942b85CA6706', // POSI
+            '0xD22202d23fE7dE9E3DbE11a2a88F42f4CB9507cf', // MNEP
+        ],
+    };
+
+    for (const excludedTokenNetwork in excludedTokens) {
+        const network = Number(excludedTokenNetwork);
+        const excludedTokenList = (excludedTokens as any)[network];
+
+        excludedTokenList.forEach((excludedToken: string) => {
+            delete TOKENS[network][excludedToken];
+        });
+    }
+
     writeFileSync('token-list.json', TOKENS);
 })();
 
@@ -215,7 +233,12 @@ const get = async <T>(url: string): Promise<T> => {
 (async () => {
     // Fetch Coingecko asset platforms list
     const coinGeckoList = await get<
-        { id: string; chain_identifier: number; name: string; shortname: string; }[]
+        {
+            id: string;
+            chain_identifier: number;
+            name: string;
+            shortname: string;
+        }[]
     >(`https://api.coingecko.com/api/v3/asset_platforms`);
     const assetPlatforms = {} as { [chainId: number]: string };
 

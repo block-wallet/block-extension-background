@@ -2,7 +2,10 @@
 import { INetworkTokens, IToken } from './Token';
 import tl from '../../../token-list.json';
 
-export const BLANK_TOKEN_ADDRESS = '0x41A3Dba3D677E573636BA691a70ff2D606c29666';
+export const BLANK_TOKEN_ADDRESSES: { [chainId in number]: string } = {
+    1: '0x41A3Dba3D677E573636BA691a70ff2D606c29666',
+    137: '0xf4c83080e80ae530d6f8180572cbbf1ac9d5d435',
+};
 export const BLANK_TOKEN_NAME = 'GoBlank';
 
 const tokenList: {
@@ -31,7 +34,16 @@ const NETWORK_TOKENS_LIST: INetworkTokens = {
     69: {}, // optimism kovan
     420: {}, // optimism goerli
     77: {}, // poa
-    137: {}, // polygon
+    137: {
+        '0xf4C83080E80AE530d6f8180572cBbf1Ac9D5d435': {
+            name: 'GoBlank Token',
+            symbol: 'BLANK',
+            type: 'ERC20',
+            address: '0xf4C83080E80AE530d6f8180572cBbf1Ac9D5d435',
+            decimals: 18,
+            logo: chrome.runtime.getURL('icons/icon-48.png'),
+        },
+    }, // polygon
     80001: {}, // polygon testnet mumbai
     10000: {}, // smartbch
     56: {}, // smartchain
@@ -99,6 +111,13 @@ for (const chainId in tokenList) {
     }
     for (const address in tokenList[chainId]) {
         const token = tokenList[chainId][address];
+
+        // Replace the blank token icon for the local file.
+        if (parseInt(chainId) in BLANK_TOKEN_ADDRESSES) {
+            if (address === BLANK_TOKEN_ADDRESSES[parseInt(chainId)]) {
+                token['logo'] = chrome.runtime.getURL('icons/icon-48.png');
+            }
+        }
 
         const iToken = {
             address,

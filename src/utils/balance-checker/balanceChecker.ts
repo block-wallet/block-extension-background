@@ -1,5 +1,6 @@
 import { isAddress } from '@ethersproject/address';
 import { BigNumber, Contract, providers, Signer } from 'ethers';
+import log from 'loglevel';
 import BalanceCheckerABI from './abis/BalanceChecker.abi.json';
 
 const SINGLE_CALL_BALANCES_CONTRACTS: {
@@ -36,7 +37,7 @@ const SINGLE_CALL_BALANCES_CONTRACTS: {
     100: '', // xdai
     50: '', // xdc
     5: '0x906F63676923374a7B9781BcC1B1532488d45a7a', // goerli
-    3: '0x8D9708f3F514206486D7E988533f770a16d074a7', // ropsten
+    3: '0xb8e671734ce5c8d7dfbbea5574fa4cf39f7a54a4', // ropsten
     42: '0x55ABBa8d669D60A10c104CC493ec5ef389EC92bb', // kovan
     4: '0x3183B673f4816C94BeF53958BaF93C671B7F8Cf2', // rinkeby
     97: '0x2352c63A83f9Fd126af8676146721Fa00924d7e4', // bsc testnet
@@ -154,9 +155,52 @@ export const getAddressesBalances = async (
     tokens: string[],
     chainId: number
 ): Promise<AddressBalanceMap> => {
-    const contract = getContract(provider, chainId);
-    const balances = await contract.balances(addresses, tokens);
-    return formatAddressBalances(balances, addresses, tokens);
+    try {
+        const contract = getContract(provider, chainId);
+        const max = 100;
+        const steps = Math.ceil(tokens.length / max);
+        const fetchs: Promise<void>[] = new Array(steps);
+        const balances: AddressBalanceMap = {};
+
+        for (let i = 0; i < fetchs.length; i++) {
+            const start = max * i;
+            const end = max * (i + 1);
+
+            fetchs[i] = new Promise<void>((resolve, reject) => {
+                const newTokens = tokens.slice(start, end);
+                contract
+                    .balances(addresses, newTokens)
+                    .then((b: BigNumber[]) => {
+                        const pb = formatAddressBalances(
+                            b,
+                            addresses,
+                            newTokens
+                        );
+                        for (const a in pb) {
+                            if (a in balances) {
+                                Object.assign(balances[a], pb[a]);
+                            } else {
+                                balances[a] = pb[a];
+                            }
+                        }
+                        resolve();
+                    })
+                    .catch((err: Error) => reject(err));
+            });
+        }
+
+        await Promise.all(fetchs);
+
+        return balances;
+    } catch (error) {
+        log.warn(
+            `Error fetching single balance contract for ${addresses} in chain ${chainId}`,
+            error
+        );
+        throw new Error(
+            `Error fetching single balance contract for ${addresses} in chain ${chainId}`
+        );
+    }
 };
 
 /**
@@ -174,9 +218,9 @@ export const getAddressBalances = async (
     tokens: string[],
     chainId: number
 ): Promise<BalanceMap> => {
-    return new Promise<BalanceMap>((resolve) => {
-        getAddressesBalances(provider, [address], tokens, chainId).then(
-            (balances) => resolve(balances[address])
-        );
+    return new Promise<BalanceMap>((resolve, reject) => {
+        getAddressesBalances(provider, [address], tokens, chainId)
+            .then((balances) => resolve(balances[address]))
+            .catch((err) => reject(err));
     });
 };

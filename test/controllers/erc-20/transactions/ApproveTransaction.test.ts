@@ -81,7 +81,8 @@ describe('ApproveTransaction implementation', function () {
             mockKeyringController,
             networkController,
             tokenController,
-            tokenOperationsController
+            tokenOperationsController,
+            preferencesController
         );
 
         exchangeRatesController = new ExchangeRatesController(

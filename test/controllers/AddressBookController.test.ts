@@ -142,7 +142,6 @@ describe('Address book controller implementation', function () {
                 pendingWithdrawals: {} as PendingWithdrawalsStore,
                 vaultState: { vault: '' },
             },
-            blockUpdatesController,
             tornadoEventsService,
         });
         keyringController = new KeyringControllerDerivated({});
@@ -151,6 +150,7 @@ describe('Address book controller implementation', function () {
             networkController,
             tokenController,
             tokenOperationsController,
+            preferencesController,
             { accounts: {}, isAccountTrackerLoading: false }
         );
         incomingTransactionController = new IncomingTransactionController(

@@ -92,6 +92,37 @@ export interface GetPermissionResponse {
     caveats?: Record<string, unknown>[];
 }
 
+// https://geth.ethereum.org/docs/rpc/pubsub
+export enum SubscriptionType {
+    logs = 'logs',
+    newHeads = 'newHeads',
+    newPendingTransactions = 'newPendingTransactions',
+    syncing = 'syncing',
+}
+
+export interface SubscriptionParam {
+    [SubscriptionType.logs]?: {
+        address?: string | string[]; // address or array of addresses
+        topics?: string[]; // logs which match the specified topics
+    };
+    [SubscriptionType.newHeads]: undefined;
+    [SubscriptionType.newPendingTransactions]: undefined;
+    [SubscriptionType.syncing]: undefined;
+}
+
+export type SubscriptionParams = [
+    SubscriptionType,
+    SubscriptionParam[SubscriptionType]
+];
+
+export interface SubcriptionResult {
+    method: 'eth_subscription';
+    params: {
+        subscription: string; // Subscription id
+        result: Record<string, unknown>; // Subscription data
+    };
+}
+
 // EIP-747
 export interface WatchAssetParameters {
     type: string; // Asset's interface
@@ -110,7 +141,7 @@ export interface WatchAssetReq {
         decimals: number;
         image?: string; // URL
     };
-    accountAddress?: string; // Account connected to the dapp
+    activeAccount?: string; // Account connected to the dapp
     isUpdate: boolean; // If token already exists
     savedToken?: WatchAssetReq['params']; // Existing token data
 }
@@ -316,7 +347,9 @@ export enum JSONRPCMethod {
     wallet_watchAsset = 'wallet_watchAsset',
     web3_clientVersion = 'web3_clientVersion',
     web3_sha3 = 'web3_sha3',
+    // pub/sub
     eth_subscribe = 'eth_subscribe',
+    eth_unsubscribe = 'eth_unsubscribe',
 }
 
 // External provider methods
@@ -353,5 +386,4 @@ export const ExtProviderMethods = [
     JSONRPCMethod.net_peerCount,
     JSONRPCMethod.net_version,
     JSONRPCMethod.web3_clientVersion,
-    JSONRPCMethod.eth_subscribe,
 ];

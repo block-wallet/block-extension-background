@@ -7,6 +7,16 @@ import { AddressBook } from '@blank/background/controllers/AddressBookController
 import { TransactionControllerState } from '@blank/background/controllers/transactions/TransactionController';
 
 const persistedState = {
+    BlockFetchController: {
+        blockFetchData: {
+            1: {
+                offChainSupport: false,
+                checkingOffChainSupport: false,
+                currentBlockNumber: 0,
+                lastBlockOffChainChecked: -100,
+            },
+        },
+    },
     AddressBookController: {
         addressBook: {} as AddressBook,
         recentAddresses: {} as AddressBook,
@@ -112,6 +122,16 @@ const initialState: BlankAppState & {
     OnboardingController: { newAddedKeyOnLevel2: boolean };
     PreferencesController: { newAddedKeyOnLevel2: string };
 } = {
+    BlockFetchController: {
+        blockFetchData: {
+            1: {
+                offChainSupport: false,
+                checkingOffChainSupport: false,
+                currentBlockNumber: 0,
+                lastBlockOffChainChecked: -100,
+            },
+        },
+    },
     BlockUpdatesController: {
         blockData: { 5: { blockNumber: -1, updateCounter: -1 } },
     },
@@ -214,6 +234,16 @@ describe('State reconciler', () => {
     it('Should reconcile two levels of the persisted state with the initial state correctly', () => {
         const newState = reconcileState<any>(persistedState, initialState);
         expect(newState).to.be.deep.equal({
+            BlockFetchController: {
+                blockFetchData: {
+                    1: {
+                        offChainSupport: false,
+                        checkingOffChainSupport: false,
+                        currentBlockNumber: 0,
+                        lastBlockOffChainChecked: -100,
+                    },
+                },
+            },
             BlockUpdatesController: { blockData: { 5: -1 } },
             AddressBookController: {
                 addressBook: {} as AddressBook,

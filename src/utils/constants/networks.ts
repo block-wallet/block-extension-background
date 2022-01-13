@@ -55,7 +55,7 @@ export const INITIAL_NETWORKS: Networks = {
         wsUrls: ['wss://mainnet-node.goblank.io/ws'],
         blockExplorerUrls: ['https://etherscan.io'],
         etherscanApiUrl: 'https://api.etherscan.io',
-        assetsAutoDiscoveryInterval: 10,
+        assetsAutoDiscoveryInterval: 20,
     },
     ARBITRUM: {
         name: 'arbitrum',
@@ -78,7 +78,7 @@ export const INITIAL_NETWORKS: Networks = {
         wsUrls: ['wss://arb1.arbitrum.io/ws'],
         blockExplorerUrls: ['https://arbiscan.io'],
         etherscanApiUrl: 'https://api.arbiscan.io',
-        assetsAutoDiscoveryInterval: 15,
+        assetsAutoDiscoveryInterval: 30,
     },
     OPTIMISM: {
         name: 'optimism',
@@ -100,7 +100,7 @@ export const INITIAL_NETWORKS: Networks = {
         rpcUrls: ['https://mainnet.optimism.io'],
         blockExplorerUrls: ['https://optimistic.etherscan.io'],
         etherscanApiUrl: 'https://api-optimistic.etherscan.io',
-        assetsAutoDiscoveryInterval: 15,
+        assetsAutoDiscoveryInterval: 30,
     },
     BSC: {
         name: 'bsc',
@@ -125,7 +125,7 @@ export const INITIAL_NETWORKS: Networks = {
         rpcUrls: ['https://bsc-dataseed1.binance.org:443'],
         blockExplorerUrls: ['https://bscscan.com'],
         etherscanApiUrl: 'https://api.bscscan.com',
-        assetsAutoDiscoveryInterval: 15,
+        assetsAutoDiscoveryInterval: 45,
     },
     POLYGON: {
         name: 'polygon',
@@ -152,11 +152,11 @@ export const INITIAL_NETWORKS: Networks = {
         features: [FEATURES.SENDS],
         ens: false,
         showGasLevels: true,
-        rpcUrls: [`https://rpc-mainnet.maticvigil.com`],
+        rpcUrls: [`https://polygon-node.goblank.io`],
         wsUrls: ['wss://ws-matic-mainnet.chainstacklabs.com'],
         blockExplorerUrls: ['https://polygonscan.com'],
         etherscanApiUrl: 'https://api.polygonscan.com',
-        assetsAutoDiscoveryInterval: 15,
+        assetsAutoDiscoveryInterval: 75,
     },
     GOERLI: {
         name: 'goerli',
@@ -179,7 +179,7 @@ export const INITIAL_NETWORKS: Networks = {
         wsUrls: ['wss://goerli-node.goblank.io/ws'],
         blockExplorerUrls: ['https://goerli.etherscan.io'],
         etherscanApiUrl: 'https://api-goerli.etherscan.io',
-        assetsAutoDiscoveryInterval: 15,
+        assetsAutoDiscoveryInterval: 30,
     },
     ROPSTEN: {
         name: 'ropsten',
@@ -202,7 +202,7 @@ export const INITIAL_NETWORKS: Networks = {
         wsUrls: ['wss://ropsten-node.goblank.io/ws'],
         blockExplorerUrls: ['https://ropsten.etherscan.io'],
         etherscanApiUrl: 'https://api-ropsten.etherscan.io',
-        assetsAutoDiscoveryInterval: 15,
+        assetsAutoDiscoveryInterval: 30,
     },
     KOVAN: {
         name: 'kovan',
@@ -225,7 +225,7 @@ export const INITIAL_NETWORKS: Networks = {
         wsUrls: ['wss://kovan-node.goblank.io/ws'],
         blockExplorerUrls: ['https://kovan.etherscan.io'],
         etherscanApiUrl: 'https://api-kovan.etherscan.io',
-        assetsAutoDiscoveryInterval: 15,
+        assetsAutoDiscoveryInterval: 30,
     },
     RINKEBY: {
         name: 'rinkeby',
@@ -248,7 +248,7 @@ export const INITIAL_NETWORKS: Networks = {
         wsUrls: ['wss://rinkeby-node.goblank.io/ws'],
         blockExplorerUrls: ['https://rinkeby.etherscan.io'],
         etherscanApiUrl: 'https://api-rinkeby.etherscan.io',
-        assetsAutoDiscoveryInterval: 15,
+        assetsAutoDiscoveryInterval: 30,
     },
     BSC_TESTNET: {
         name: 'bsc_testnet',
@@ -272,7 +272,7 @@ export const INITIAL_NETWORKS: Networks = {
         showGasLevels: true,
         rpcUrls: ['https://data-seed-prebsc-1-s1.binance.org:8545/'],
         blockExplorerUrls: ['https://testnet.bscscan.io'],
-        assetsAutoDiscoveryInterval: 15,
+        assetsAutoDiscoveryInterval: 75,
     },
     LOCALHOST: {
         name: 'localhost',

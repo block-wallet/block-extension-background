@@ -30,6 +30,7 @@ import { AccountTrackerController } from '@blank/background/controllers/AccountT
 import { ExchangeRatesController } from '@blank/background/controllers/ExchangeRatesController';
 import { IncomingTransactionController } from '@blank/background/controllers/IncomingTransactionController';
 import BlockUpdatesController from '@blank/background/controllers/BlockUpdatesController';
+import BlockFetchController from '@blank/background/controllers/BlockFetchController';
 
 describe('ApproveTransaction implementation', function () {
     const daiAddress = '0xdc31Ee1784292379Fbb2964b3B9C4124D8F89C60';
@@ -53,6 +54,7 @@ describe('ApproveTransaction implementation', function () {
     let gasPricesController: GasPricesController;
     let tokenController: TokenController;
     let tokenOperationsController: TokenOperationsController;
+    let blockFetchController: BlockFetchController;
     let blockUpdatesController: BlockUpdatesController;
     let exchangeRatesController: ExchangeRatesController;
     let incomingTransactionController: IncomingTransactionController;
@@ -123,6 +125,10 @@ describe('ApproveTransaction implementation', function () {
             { txHistoryLimit: 40 }
         );
 
+        blockFetchController = new BlockFetchController(networkController, {
+            blockFetchData: {},
+        });
+
         blockUpdatesController = new BlockUpdatesController(
             networkController,
             accountTrackerController,
@@ -130,6 +136,7 @@ describe('ApproveTransaction implementation', function () {
             exchangeRatesController,
             incomingTransactionController,
             transactionController,
+            blockFetchController,
             { blockData: {} }
         );
 

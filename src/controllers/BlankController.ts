@@ -160,6 +160,7 @@ import { TornadoEventsService } from './blank-deposit/tornado/TornadoEventsServi
 
 import tornadoConfig from './blank-deposit/tornado/config/config';
 import ComposedStore from '../infrastructure/stores/ComposedStore';
+import BlockFetchController from './BlockFetchController';
 
 export interface BlankControllerProps {
     initState: BlankAppState;
@@ -191,6 +192,7 @@ export default class BlankController extends EventEmitter {
     private readonly activityListController: ActivityListController;
     private readonly permissionsController: PermissionsController;
     private readonly addressBookController: AddressBookController;
+    private readonly blockFetchController: BlockFetchController;
     private readonly blockUpdatesController: BlockUpdatesController;
 
     // Stores
@@ -294,6 +296,11 @@ export default class BlankController extends EventEmitter {
             this.keyringController.signTransaction.bind(this.keyringController)
         );
 
+        this.blockFetchController = new BlockFetchController(
+            this.networkController,
+            initState.BlockFetchController
+        );
+
         this.blockUpdatesController = new BlockUpdatesController(
             this.networkController,
             this.accountTrackerController,
@@ -301,6 +308,7 @@ export default class BlankController extends EventEmitter {
             this.exchangeRatesController,
             this.incomingTransactionController,
             this.transactionController,
+            this.blockFetchController,
             initState.BlockUpdatesController
         );
 
@@ -375,6 +383,7 @@ export default class BlankController extends EventEmitter {
             PermissionsController: this.permissionsController.store,
             AddressBookController: this.addressBookController.store,
             BlockUpdatesController: this.blockUpdatesController.store,
+            BlockFetchController: this.blockFetchController.store,
         });
 
         this.UIStore = new ComposedStore<BlankAppUIState>({

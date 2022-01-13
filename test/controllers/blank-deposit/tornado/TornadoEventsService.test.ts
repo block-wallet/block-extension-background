@@ -23,6 +23,7 @@ import TransactionController from '@blank/background/controllers/transactions/Tr
 import { TypedTransaction } from '@ethereumjs/tx';
 import PermissionsController from '@blank/background/controllers/PermissionsController';
 import { mockedPermissionsController } from 'test/mocks/mock-permissions';
+import BlockFetchController from '@blank/background/controllers/BlockFetchController';
 
 describe('TornadoEventsService', () => {
     const accounts = {
@@ -44,6 +45,7 @@ describe('TornadoEventsService', () => {
     let tokenController: TokenController;
     let tokenOperationsController: TokenOperationsController;
     let gasPricesController: GasPricesController;
+    let blockFetchController: BlockFetchController;
     let blockUpdatesController: BlockUpdatesController;
     let exchangeRatesController: ExchangeRatesController;
     let incomingTransactionController: IncomingTransactionController;
@@ -105,6 +107,10 @@ describe('TornadoEventsService', () => {
             { txHistoryLimit: 40 }
         );
 
+        blockFetchController = new BlockFetchController(networkController, {
+            blockFetchData: {},
+        });
+
         blockUpdatesController = new BlockUpdatesController(
             networkController,
             accountTrackerController,
@@ -112,6 +118,7 @@ describe('TornadoEventsService', () => {
             exchangeRatesController,
             incomingTransactionController,
             transactionController,
+            blockFetchController,
             { blockData: {} }
         );
 

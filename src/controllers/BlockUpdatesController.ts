@@ -2,13 +2,13 @@ import { Mutex } from 'async-mutex';
 import log from 'loglevel';
 import { BaseController } from '../infrastructure/BaseController';
 import { AccountTrackerController } from './AccountTrackerController';
+import BlockFetchController from './BlockFetchController';
 import { ExchangeRatesController } from './ExchangeRatesController';
 import { GasPricesController } from './GasPricesController';
 import { IncomingTransactionController } from './IncomingTransactionController';
 import NetworkController, { NetworkEvents } from './NetworkController';
 import TransactionController from './transactions/TransactionController';
 
-export const BLOCK_UPDATES_INTERVAL = 15000;
 export interface BlockUpdatesControllerState {
     blockData: {
         [chainId: number]: { blockNumber: number; updateCounter: number };
@@ -32,23 +32,18 @@ export default class BlockUpdatesController extends BaseController<BlockUpdatesC
         private readonly _exchangeRatesController: ExchangeRatesController,
         private readonly _incomingTransactionController: IncomingTransactionController,
         private readonly _transactionController: TransactionController,
+        private readonly _blockFetchController: BlockFetchController,
         initialState: BlockUpdatesControllerState
     ) {
         super(initialState);
 
         this._mutex = new Mutex();
 
-        // Set the ethers polling interval
-        this._networkController.getProvider().pollingInterval =
-            BLOCK_UPDATES_INTERVAL;
-
         this.initBlockNumber(_networkController.network.chainId);
 
         _networkController.on(NetworkEvents.NETWORK_CHANGE, async () => {
-            this._networkController.getProvider().pollingInterval =
-                BLOCK_UPDATES_INTERVAL;
-
-            this.initBlockNumber(_networkController.network.chainId);
+            this.initBlockNumber(this._networkController.network.chainId);
+            this.updateTransactionsSubscription();
         });
 
         /**
@@ -67,9 +62,12 @@ export default class BlockUpdatesController extends BaseController<BlockUpdatesC
          */
         this.on(BlockUpdatesEvents.SUBSCRIPTION_UPDATE, () => {
             if (this.shouldQuery || this.shouldQueryTransactions) {
-                this._networkController.addOnBlockListener(this._blockUpdates);
+                this._blockFetchController.addNewOnBlockListener(
+                    this._networkController.network.chainId,
+                    this._blockUpdates
+                );
             } else {
-                this._networkController.removeAllOnBlockListener();
+                this._blockFetchController.removeAllOnBlockListener();
             }
         });
     }
@@ -156,14 +154,11 @@ export default class BlockUpdatesController extends BaseController<BlockUpdatesC
      * Triggered on each block update, it stores the latest block number
      * and triggers updates for different controllers if needed
      */
-    private _blockUpdates = async (): Promise<void> => {
+    private _blockUpdates = async (blockNumber: number): Promise<void> => {
         const releaseLock = await this._mutex.acquire();
         try {
             if (!this._networkController.isNetworkChanging) {
-                const {
-                    blockNumber,
-                    network: { chainId },
-                } = this._networkController.getProvider();
+                const chainId = this._networkController.network.chainId;
 
                 let { blockData } = this.store.getState();
                 if (!(chainId in blockData)) {

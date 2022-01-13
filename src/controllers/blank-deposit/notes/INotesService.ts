@@ -2,18 +2,24 @@ import { CurrencyAmountPair } from '../types';
 import { IBlankDeposit } from '../BlankDeposit';
 import { INoteDeposit } from './INoteDeposit';
 
+export type NextDepositResult = {
+    nextDeposit: {
+        spent?: boolean | undefined;
+        deposit: INoteDeposit;
+        pair: CurrencyAmountPair;
+        replacedFailedDeposit?: boolean;
+    };
+    recoveredDeposits?: IBlankDeposit[];
+};
+
 export interface INotesService {
     /**
-     * It fetches new possible deposits that the user may have done
+     * It returns the next free deposit in the derivation chain
+     * that is neither used nor is a hole
      */
-    getNextFreeDeposit(currencyAmountPair: CurrencyAmountPair): Promise<{
-        nextDeposit: {
-            spent?: boolean | undefined;
-            deposit: INoteDeposit;
-            pair: CurrencyAmountPair;
-        };
-        recoveredDeposits?: IBlankDeposit[];
-    }>;
+    getNextFreeDeposit(
+        currencyAmountPair: CurrencyAmountPair
+    ): Promise<NextDepositResult>;
 
     /**
      * reconstruct
@@ -25,7 +31,7 @@ export interface INotesService {
     reconstruct(
         mnemonic: string,
         lastDepositIndex?: number
-    ): Promise<PromiseSettledResult<IBlankDeposit[]>[]>;
+    ): Promise<PromiseSettledResult<NextDepositResult>[]>;
 
     /**
      * Returns a note string from a deposit

@@ -30,11 +30,8 @@ import schemaValidator from 'schema-validator';
 export const validateSignature = <TSignatureType extends SignatureTypes>(
     method: TSignatureType,
     params: RawSignatureData[TSignatureType],
-    permissions: string[],
     chainId: string
 ): NormalizedSignatureParams<TSignatureType> => {
-    let hasPermission = false;
-
     const nParams = normalizeParams(method, params);
 
     // Validate
@@ -55,19 +52,6 @@ export const validateSignature = <TSignatureType extends SignatureTypes>(
 
     // Checksum address
     nParams.address = toChecksumAddress(nParams.address);
-
-    // Check permissions
-    permissions.forEach((permission) => {
-        if (nParams.address === permission) {
-            hasPermission = true;
-        }
-    });
-
-    if (!hasPermission) {
-        throw new Error(
-            'The signing address has no permissions for this origin'
-        );
-    }
 
     if (method === JSONRPCMethod.personal_sign) {
         if (typeof nParams.data !== 'string') {

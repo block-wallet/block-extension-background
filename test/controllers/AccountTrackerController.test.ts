@@ -4,7 +4,11 @@ import sinon from 'sinon';
 import { BigNumber, ethers } from 'ethers';
 import { EventEmitter } from 'events';
 import { INITIAL_NETWORKS } from '../../src/utils/constants/networks';
-import { AccountTrackerController } from '../../src/controllers/AccountTrackerController';
+import {
+    AccountBalanceToken,
+    Accounts,
+    AccountTrackerController,
+} from '../../src/controllers/AccountTrackerController';
 import NetworkController from '../../src/controllers/NetworkController';
 import { mockPreferencesController } from '../mocks/mock-preferences';
 import {
@@ -107,7 +111,8 @@ describe('AccountTracker controller implementation', function () {
             keyringController,
             networkController,
             tokenController,
-            tokenOperationsController
+            tokenOperationsController,
+            preferencesController
         );
 
         exchangeRatesController = new ExchangeRatesController(
@@ -142,6 +147,10 @@ describe('AccountTracker controller implementation', function () {
             transactionController,
             { blockData: {} }
         );
+    });
+
+    afterEach(function () {
+        sinon.restore();
     });
 
     it('Should init properly', () => {
@@ -182,7 +191,9 @@ describe('AccountTracker controller implementation', function () {
                 expect(a.balances[5]).to.be.empty;
             });
 
-            accountTrackerController.updateAccounts();
+            accountTrackerController.updateAccounts({
+                assetsAutoDiscovery: true,
+            });
             ({ accounts } = accountTrackerController.store.getState());
 
             Object.values(accounts).forEach((a) => {
@@ -230,7 +241,9 @@ describe('AccountTracker controller implementation', function () {
                 },
             });
 
-            await accountTrackerController.updateAccounts();
+            await accountTrackerController.updateAccounts({
+                assetsAutoDiscovery: true,
+            });
 
             const { accounts } = accountTrackerController.store.getState();
 
@@ -241,6 +254,7 @@ describe('AccountTracker controller implementation', function () {
                 accounts[accountAddress].balances[5].nativeTokenBalance._hex
             ).equal(BigNumber.from('0x00')._hex);
         });
+
         it('An account with eth balance', async () => {
             const accountAddress = '0x25f3f89bc136975c10a1afe9ad70695a4f451ac4';
             accountTrackerController.store.updateState({
@@ -260,7 +274,9 @@ describe('AccountTracker controller implementation', function () {
                 },
             });
 
-            await accountTrackerController.updateAccounts();
+            await accountTrackerController.updateAccounts({
+                assetsAutoDiscovery: true,
+            });
 
             const { accounts } = accountTrackerController.store.getState();
 
@@ -270,7 +286,8 @@ describe('AccountTracker controller implementation', function () {
             expect(
                 accounts[accountAddress].balances[5].nativeTokenBalance._hex
             ).not.equal(BigNumber.from('0x00')._hex);
-        }).timeout(10000);
+        });
+
         it('A simple token balance check', async () => {
             const accountAddress = '0x281ae730d284bDA68F4e9Ac747319c8eDC7dF3B1';
             accountTrackerController.store.updateState({
@@ -290,14 +307,17 @@ describe('AccountTracker controller implementation', function () {
                 },
             });
 
-            await accountTrackerController.updateAccounts();
+            await accountTrackerController.updateAccounts({
+                assetsAutoDiscovery: true,
+            });
 
             const { accounts } = accountTrackerController.store.getState();
 
             expect(accounts).to.be.not.null;
             expect(accounts[accountAddress]).to.be.not.null;
             expect(accounts[accountAddress].address).equal(accountAddress);
-        }).timeout(10000);
+        });
+
         it('A simple token balance check without balance', async () => {
             const accountAddress = '0x25f3f89bc136975c10a1afe9ad70695a4f451ac4';
             accountTrackerController.store.updateState({
@@ -317,7 +337,9 @@ describe('AccountTracker controller implementation', function () {
                 },
             });
 
-            await accountTrackerController.updateAccounts();
+            await accountTrackerController.updateAccounts({
+                assetsAutoDiscovery: true,
+            });
 
             const { accounts } = accountTrackerController.store.getState();
 
@@ -325,7 +347,8 @@ describe('AccountTracker controller implementation', function () {
             expect(accounts[accountAddress]).to.be.not.null;
             expect(accounts[accountAddress].address).equal(accountAddress);
             expect(accounts[accountAddress].balances[5].tokens).to.be.empty;
-        }).timeout(10000);
+        });
+
         it('A simple token balance check with balance', async () => {
             const accountAddress = '0x281ae730d284bDA68F4e9Ac747319c8eDC7dF3B1';
             accountTrackerController.store.updateState({
@@ -345,7 +368,9 @@ describe('AccountTracker controller implementation', function () {
                 },
             });
 
-            await accountTrackerController.updateAccounts();
+            await accountTrackerController.updateAccounts({
+                assetsAutoDiscovery: true,
+            });
 
             const { accounts } = accountTrackerController.store.getState();
 
@@ -358,7 +383,8 @@ describe('AccountTracker controller implementation', function () {
                     '0xdc31Ee1784292379Fbb2964b3B9C4124D8F89C60'
                 ]
             ).to.be.not.null;
-        }).timeout(10000);
+        });
+
         it('A simple token balance check without balance but with manually added tokens', async () => {
             sinon.stub(TokenController.prototype, 'getUserTokens').returns(
                 new Promise<ITokens>((resolve) => {
@@ -390,7 +416,9 @@ describe('AccountTracker controller implementation', function () {
                 },
             });
 
-            await accountTrackerController.updateAccounts();
+            await accountTrackerController.updateAccounts({
+                assetsAutoDiscovery: true,
+            });
 
             const { accounts } = accountTrackerController.store.getState();
 
@@ -403,7 +431,8 @@ describe('AccountTracker controller implementation', function () {
                     '0xb7FC2023D96AEa94Ba0254AA5Aeb93141e4aad66'
                 ]
             ).to.be.not.null;
-        }).timeout(10000);
+        });
+
         it('A multiple accounts check without token balance', async () => {
             const accountAddress1 =
                 '0x25f3f89bc136975c10a1afe9ad70695a4f451ac4';
@@ -452,7 +481,9 @@ describe('AccountTracker controller implementation', function () {
                 },
             });
 
-            await accountTrackerController.updateAccounts();
+            await accountTrackerController.updateAccounts({
+                assetsAutoDiscovery: true,
+            });
 
             const { accounts } = accountTrackerController.store.getState();
 
@@ -466,7 +497,8 @@ describe('AccountTracker controller implementation', function () {
             expect(accounts[accountAddress3]).to.be.not.null;
             expect(accounts[accountAddress3].address).equal(accountAddress3);
             expect(accounts[accountAddress3].balances[5].tokens).to.be.empty;
-        }).timeout(10000);
+        });
+
         it('A multiple accounts check with balance', async () => {
             const accountAddress1 =
                 '0x281ae730d284bDA68F4e9Ac747319c8eDC7dF3B1';
@@ -501,7 +533,9 @@ describe('AccountTracker controller implementation', function () {
                 },
             });
 
-            await accountTrackerController.updateAccounts();
+            await accountTrackerController.updateAccounts({
+                assetsAutoDiscovery: true,
+            });
 
             const { accounts } = accountTrackerController.store.getState();
 
@@ -514,7 +548,8 @@ describe('AccountTracker controller implementation', function () {
             expect(accounts[accountAddress2].address).equal(accountAddress2);
             expect(accounts[accountAddress2].balances[5].tokens).to.be.not
                 .empty;
-        }).timeout(10000);
+        });
+
         it('A multiple accounts check without token balance but with manually added tokens', async () => {
             sinon.stub(TokenController.prototype, 'getUserTokens').returns(
                 new Promise<ITokens>((resolve) => {
@@ -581,7 +616,9 @@ describe('AccountTracker controller implementation', function () {
                 },
             });
 
-            await accountTrackerController.updateAccounts();
+            await accountTrackerController.updateAccounts({
+                assetsAutoDiscovery: true,
+            });
 
             const { accounts } = accountTrackerController.store.getState();
 
@@ -630,7 +667,8 @@ describe('AccountTracker controller implementation', function () {
                     '0xb7FC2023D96AEa94Ba0254AA5Aeb93141e4aad66'
                 ]
             ).to.be.not.null;
-        }).timeout(10000);
+        });
+
         it('A multiple accounts check without token balance but with manually added tokens and manually deleted tokens', async () => {
             sinon.stub(TokenController.prototype, 'getUserTokens').returns(
                 new Promise<ITokens>((resolve) => {
@@ -706,7 +744,9 @@ describe('AccountTracker controller implementation', function () {
                 },
             });
 
-            await accountTrackerController.updateAccounts();
+            await accountTrackerController.updateAccounts({
+                assetsAutoDiscovery: true,
+            });
 
             const { accounts } = accountTrackerController.store.getState();
 
@@ -755,7 +795,8 @@ describe('AccountTracker controller implementation', function () {
                     '0xb7FC2023D96AEa94Ba0254AA5Aeb93141e4aad66'
                 ]
             ).to.be.undefined;
-        }).timeout(10000);
+        });
+
         it('A multiple accounts check with balance and without balance', async () => {
             const accountAddress1 =
                 '0x281ae730d284bDA68F4e9Ac747319c8eDC7dF3B1';
@@ -790,7 +831,9 @@ describe('AccountTracker controller implementation', function () {
                 },
             });
 
-            await accountTrackerController.updateAccounts();
+            await accountTrackerController.updateAccounts({
+                assetsAutoDiscovery: true,
+            });
 
             const { accounts } = accountTrackerController.store.getState();
 
@@ -812,10 +855,145 @@ describe('AccountTracker controller implementation', function () {
                 ]
             ).to.be.undefined;
         });
-        afterEach(function () {
-            sinon.restore();
+
+        it('Assets auto discovery', async () => {
+            sinon
+                .stub(TokenController.prototype, 'getContractAddresses')
+                .returns(
+                    new Promise<string[]>((resolve) => {
+                        resolve([
+                            '0xdc31Ee1784292379Fbb2964b3B9C4124D8F89C60',
+                            '0xb7FC2023D96AEa94Ba0254AA5Aeb93141e4aad66',
+                            '0xD87Ba7A50B2E7E660f678A895E4B72E7CB4CCd9C',
+                        ]);
+                    })
+                );
+
+            sinon
+                .stub(
+                    TokenController.prototype,
+                    'getUserTokenContractAddresses'
+                )
+                .returns(
+                    new Promise<string[]>((resolve) => {
+                        resolve(['0xb7FC2023D96AEa94Ba0254AA5Aeb93141e4aad66']);
+                    })
+                );
+
+            const accounts = {
+                '0x281ae730d284bDA68F4e9Ac747319c8eDC7dF3B1': {
+                    address: '0x281ae730d284bDA68F4e9Ac747319c8eDC7dF3B1',
+                    balances: {
+                        5: {
+                            nativeTokenBalance: BigNumber.from(0),
+                            tokens: {},
+                        },
+                    },
+
+                    index: 0,
+                    external: false,
+                    name: 'Account 1',
+                },
+            } as Accounts;
+
+            // Auto discovery deactivated
+            accountTrackerController.store.updateState({
+                accounts: accounts,
+            });
+
+            await accountTrackerController.updateAccounts({
+                assetsAutoDiscovery: false,
+            });
+
+            let noAutoDiscoveryAccount =
+                accountTrackerController.store.getState().accounts;
+
+            expect(noAutoDiscoveryAccount).not.equal(undefined);
+            expect(
+                noAutoDiscoveryAccount[
+                    '0x281ae730d284bDA68F4e9Ac747319c8eDC7dF3B1'
+                ]
+            ).not.equal(undefined);
+            expect(
+                noAutoDiscoveryAccount[
+                    '0x281ae730d284bDA68F4e9Ac747319c8eDC7dF3B1'
+                ].balances[5]
+            ).not.equal(undefined);
+            expect(
+                noAutoDiscoveryAccount[
+                    '0x281ae730d284bDA68F4e9Ac747319c8eDC7dF3B1'
+                ].balances[5].tokens
+            ).not.equal(undefined);
+            expect(
+                noAutoDiscoveryAccount[
+                    '0x281ae730d284bDA68F4e9Ac747319c8eDC7dF3B1'
+                ].balances[5].tokens
+            ).not.equal({});
+            expect(
+                noAutoDiscoveryAccount[
+                    '0x281ae730d284bDA68F4e9Ac747319c8eDC7dF3B1'
+                ].balances[5].tokens[
+                    '0xb7FC2023D96AEa94Ba0254AA5Aeb93141e4aad66'
+                ]
+            ).not.equal(undefined);
+            expect(
+                noAutoDiscoveryAccount[
+                    '0x281ae730d284bDA68F4e9Ac747319c8eDC7dF3B1'
+                ].balances[5].tokens[
+                    '0xdc31Ee1784292379Fbb2964b3B9C4124D8F89C60'
+                ]
+            ).equal(undefined);
+
+            // Auto discovery activated
+            accountTrackerController.store.updateState({
+                accounts: accounts,
+            });
+
+            await accountTrackerController.updateAccounts({
+                assetsAutoDiscovery: true,
+            });
+
+            noAutoDiscoveryAccount =
+                accountTrackerController.store.getState().accounts;
+
+            expect(noAutoDiscoveryAccount).not.equal(undefined);
+            expect(
+                noAutoDiscoveryAccount[
+                    '0x281ae730d284bDA68F4e9Ac747319c8eDC7dF3B1'
+                ]
+            ).not.equal(undefined);
+            expect(
+                noAutoDiscoveryAccount[
+                    '0x281ae730d284bDA68F4e9Ac747319c8eDC7dF3B1'
+                ].balances[5]
+            ).not.equal(undefined);
+            expect(
+                noAutoDiscoveryAccount[
+                    '0x281ae730d284bDA68F4e9Ac747319c8eDC7dF3B1'
+                ].balances[5].tokens
+            ).not.equal(undefined);
+            expect(
+                noAutoDiscoveryAccount[
+                    '0x281ae730d284bDA68F4e9Ac747319c8eDC7dF3B1'
+                ].balances[5].tokens
+            ).not.equal({});
+            expect(
+                noAutoDiscoveryAccount[
+                    '0x281ae730d284bDA68F4e9Ac747319c8eDC7dF3B1'
+                ].balances[5].tokens[
+                    '0xb7FC2023D96AEa94Ba0254AA5Aeb93141e4aad66'
+                ]
+            ).not.equal(undefined);
+            expect(
+                noAutoDiscoveryAccount[
+                    '0x281ae730d284bDA68F4e9Ac747319c8eDC7dF3B1'
+                ].balances[5].tokens[
+                    '0xdc31Ee1784292379Fbb2964b3B9C4124D8F89C60'
+                ]
+            ).not.equal(undefined);
         });
     }).timeout(10000);
+
     describe('AccountTracker methods with mocked etherjs', () => {
         before(async () => {
             // Stub ethers methods
@@ -998,7 +1176,7 @@ describe('AccountTracker controller implementation', function () {
         },
       })
 
-      await accountTrackerController.updateAccounts()
+      await accountTrackerController.updateAccounts({assetsAutoDiscovery: true})
 
       const { accounts } = accountTrackerController.store.getState()
 
@@ -1027,6 +1205,114 @@ describe('AccountTracker controller implementation', function () {
 
         after(function () {
             sinon.restore();
+        });
+    });
+
+    describe('Balance reconstruction for chain', async () => {
+        it('Reconstruction does not needed', async () => {
+            const accounts = {
+                '0x3399ee50696cf10dc88d0e11c3fe57f8aa46e0dd': {
+                    address: '0x3399ee50696cf10dc88d0e11c3fe57f8aa46e0dd',
+                    balances: {
+                        5: {
+                            nativeTokenBalance: BigNumber.from(100),
+                            tokens: {
+                                '0x0': {
+                                    balance: BigNumber.from(1),
+                                } as AccountBalanceToken,
+                                '0x1': {
+                                    balance: BigNumber.from(2),
+                                } as AccountBalanceToken,
+                            },
+                        },
+                        6: {
+                            nativeTokenBalance: BigNumber.from(45),
+                            tokens: {
+                                '0x0': {
+                                    balance: BigNumber.from(99),
+                                } as AccountBalanceToken,
+                                '0x1': {
+                                    balance: BigNumber.from(98),
+                                } as AccountBalanceToken,
+                            },
+                        },
+                    },
+
+                    index: 0,
+                    external: false,
+                    name: 'Account 1',
+                },
+            } as Accounts;
+
+            accountTrackerController.store.updateState({
+                accounts: accounts,
+            });
+
+            (accountTrackerController as any)['_buildBalancesForChain'](5);
+
+            expect(
+                accountTrackerController.store.getState().accounts
+            ).deep.equal(accounts);
+        });
+
+        it('Reconstruction needed', async () => {
+            const accounts = {
+                '0x3399ee50696cf10dc88d0e11c3fe57f8aa46e0dd': {
+                    address: '0x3399ee50696cf10dc88d0e11c3fe57f8aa46e0dd',
+                    balances: {
+                        6: {
+                            nativeTokenBalance: BigNumber.from(45),
+                            tokens: {
+                                '0x0': {
+                                    balance: BigNumber.from(99),
+                                } as AccountBalanceToken,
+                                '0x1': {
+                                    balance: BigNumber.from(98),
+                                } as AccountBalanceToken,
+                            },
+                        },
+                    },
+
+                    index: 0,
+                    external: false,
+                    name: 'Account 1',
+                },
+            } as Accounts;
+
+            accountTrackerController.store.updateState({
+                accounts: accounts,
+            });
+
+            (accountTrackerController as any)['_buildBalancesForChain'](5);
+
+            expect(
+                accountTrackerController.store.getState().accounts
+            ).deep.equal({
+                '0x3399ee50696cf10dc88d0e11c3fe57f8aa46e0dd': {
+                    address: '0x3399ee50696cf10dc88d0e11c3fe57f8aa46e0dd',
+                    balances: {
+                        5: {
+                            nativeTokenBalance: BigNumber.from(0),
+                            tokens: {},
+                        },
+                        6: {
+                            nativeTokenBalance: BigNumber.from(45),
+                            tokens: {
+                                '0x0': {
+                                    balance: BigNumber.from(99),
+                                } as AccountBalanceToken,
+                                '0x1': {
+                                    balance: BigNumber.from(98),
+                                } as AccountBalanceToken,
+                            },
+                        },
+                    },
+
+                    index: 0,
+                    external: false,
+                    name: 'Account 1',
+                },
+            } as Accounts);
         });
     });
 });

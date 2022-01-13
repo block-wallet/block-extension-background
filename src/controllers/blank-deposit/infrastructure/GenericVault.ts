@@ -128,10 +128,11 @@ export class GenericVault<S> extends BaseStore<{ vault: string }> {
             throw new Error('Vault locked');
         }
 
-        return this._encryptor.decrypt<S>(
+        const vault = this._encryptor.decrypt<S>(
             this.unlockPhrase!,
             this.store.getState().vault
         );
+        return vault;
     }
 
     /**
@@ -150,7 +151,7 @@ export class GenericVault<S> extends BaseStore<{ vault: string }> {
         const vault = await this.retrieve();
 
         // Update and encrypt
-        this.putStateAndLock(
+        return this.putStateAndLock(
             {
                 ...vault,
                 ...partialState,

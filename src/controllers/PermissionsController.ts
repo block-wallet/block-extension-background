@@ -64,6 +64,12 @@ export default class PermissionsController extends BaseController<PermissionsCon
         origin: string,
         siteMetadata: SiteMetadata
     ): Promise<string[]> => {
+        const currentPermissions = this.getAccounts(origin);
+
+        if (currentPermissions.length) {
+            return currentPermissions;
+        }
+
         const sitePermissions = await this._submitPermissionRequest(
             origin,
             siteMetadata

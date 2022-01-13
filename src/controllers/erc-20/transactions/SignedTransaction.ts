@@ -8,6 +8,8 @@ import {
 } from '../../transactions/TransactionController';
 
 import {
+    MetaType,
+    TransactionAdvancedData,
     TransactionCategories,
     TransactionMeta,
     TransactionStatus,
@@ -26,13 +28,19 @@ import {
 } from './Transaction';
 import * as transactionUtils from './../../transactions/utils/utils';
 import { INITIAL_NETWORKS } from '../../../utils/constants/networks';
-import { FeeData } from '../../GasPricesController';
 import { bnGreaterThanZero } from '../../../utils/bnUtils';
 import { v4 as uuid } from 'uuid';
 
 const GAS_LIMIT = 2e6;
 
-export interface PopulatedTransactionParams {}
+export interface PopulatedTransactionParams { }
+
+export interface TransactionFeeData {
+    maxFeePerGas?: BigNumber;
+    maxPriorityFeePerGas?: BigNumber;
+    gasPrice?: BigNumber;
+    gasLimit?: BigNumber;
+}
 
 /**
  * Interface for token transactions.
@@ -58,10 +66,12 @@ export interface ISignedTransaction {
      * Adds an unapproved transaction to the transaction state.
      * @param {PopulatedTransactionParams} populateTransactionParams depends on the case, the necessary data for the contract.
      * @param {FeeData} feeData an object with gas fee data.
+     * @param {TransactionAdvancedData} advancedData an object with transaction advanced data.
      */
     addAsNewTransaction(
         populateTransactionParams: PopulatedTransactionParams,
-        feeData: FeeData
+        feeData: TransactionFeeData,
+        advancedData: TransactionAdvancedData
     ): Promise<TransactionMeta>;
 
     /**
@@ -71,7 +81,7 @@ export interface ISignedTransaction {
      */
     updateTransactionGas(
         transactionId: string,
-        feeData: FeeData
+        feeData: TransactionFeeData
     ): Promise<void>;
 
     /**
@@ -102,8 +112,7 @@ export interface SignedTransactionProps extends TokenTransactionProps {
  */
 export abstract class SignedTransaction
     extends TokenTransactionController
-    implements ISignedTransaction
-{
+    implements ISignedTransaction {
     protected readonly _transactionController: TransactionController;
     protected readonly _preferencesController: PreferencesController;
     private readonly _fallbackTransactionGasLimit?: BigNumber;
@@ -158,6 +167,7 @@ export abstract class SignedTransaction
             loadingGasValues: true,
             blocksDropCount: 0,
             transactionParams: normalizedTransactionParams,
+            metaType: MetaType.REGULAR,
         };
 
         transactionMeta.origin = 'blank';
@@ -171,21 +181,25 @@ export abstract class SignedTransaction
      * Adds an unapproved transaction to the transaction state.
      * @param {PopulatedTransactionParams} populateTransactionParams depends on the case, the necessary data for the contract.
      * @param {FeeData} feeData an object with gas fee data.
+     * @param {TransactionAdvancedData} advancedData an object with transaction advanced data.
      */
     public abstract addAsNewTransaction(
         populateTransactionParams: PopulatedTransactionParams,
-        feeData: FeeData
+        feeData: TransactionFeeData,
+        advancedData: TransactionAdvancedData
     ): Promise<TransactionMeta>;
 
     /**
      * Adds an unapproved transaction to the transaction state.
      * @param {PopulatedTransactionParams} populateTransactionParams depends on the case, the necessary data for the contract.
      * @param {FeeData} feeData an object with gas fee data.
+     * @param {TransactionAdvancedData} advancedData an object with transaction advanced data.
      */
     protected async _addAsNewTransaction(
         populatedTransaction: ethers.PopulatedTransaction,
-        feeData: FeeData,
-        transactionCategory?: TransactionCategories
+        feeData: TransactionFeeData,
+        transactionCategory?: TransactionCategories,
+        advancedData?: TransactionAdvancedData
     ): Promise<TransactionMeta> {
         if (!populatedTransaction) {
             throw populatedTransactionParamNotPresentError;
@@ -219,6 +233,7 @@ export abstract class SignedTransaction
                     ...populatedTransaction,
                     from: this._preferencesController.getSelectedAddress(),
                     ...feeData,
+                    nonce: advancedData?.customNonce
                 },
                 'blank'
             );
@@ -236,7 +251,7 @@ export abstract class SignedTransaction
      */
     public async updateTransactionGas(
         transactionId: string,
-        feeData: FeeData
+        feeData: TransactionFeeData
     ): Promise<void> {
         if (!transactionId) {
             throw transactionIdParamNotPresentError;

@@ -2,10 +2,13 @@
 /* eslint-disable no-case-declarations */
 import { EventEmitter } from 'events';
 import { BigNumber, constants } from 'ethers';
-import { InfuraProvider, JsonRpcProvider } from '@ethersproject/providers';
+import {
+    StaticJsonRpcProvider,
+    TransactionReceipt,
+} from '@ethersproject/providers';
 import { Interface } from '@ethersproject/abi';
 import log from 'loglevel';
-import { addHexPrefix, bnToHex, bufferToHex } from 'ethereumjs-util';
+import { addHexPrefix, bnToHex, bufferToHex, isValidAddress, toChecksumAddress } from 'ethereumjs-util';
 import { TransactionFactory, TypedTransaction } from '@ethereumjs/tx';
 import { v4 as uuid } from 'uuid';
 import { Mutex } from 'async-mutex';
@@ -44,6 +47,14 @@ import erc20Abi from '../erc-20/abi';
 import { DEFAULT_TORNADO_CONFIRMATION } from '../blank-deposit/tornado/TornadoService';
 import { BaseController } from '../../infrastructure/BaseController';
 import { showTransactionNotification } from '../../utils/notifications';
+import { reverse } from '../../utils/array';
+import axios from 'axios';
+
+/**
+ * It indicates the amount of blocks to wait after marking
+ * a transaction as `verifiedOnBlockchain`
+ */
+export const DEFAULT_TRANSACTION_CONFIRMATIONS = 3;
 
 /**
  * @type Result
@@ -208,10 +219,11 @@ export class TransactionController extends BaseController<
         public config: {
             txHistoryLimit: number;
         } = {
-            txHistoryLimit: 40,
-        }
+                txHistoryLimit: 40,
+            }
     ) {
         super(initialState);
+
         this._nonceTracker = new NonceTracker(
             _networkController,
             (address: string) => {
@@ -269,6 +281,7 @@ export class TransactionController extends BaseController<
      */
     private onStoreUpdate = async (): Promise<void> => {
         const { chainId } = this._networkController.network;
+
         this.UIStore.updateState({
             transactions: this.store
                 .getState()
@@ -338,16 +351,18 @@ export class TransactionController extends BaseController<
         error: Error,
         dropped = false
     ) {
-        const newTransactionMeta = {
+        const newTransactionMeta: TransactionMeta = {
             ...transactionMeta,
             error,
             status: !dropped
                 ? TransactionStatus.FAILED
                 : TransactionStatus.DROPPED,
+            verifiedOnBlockchain: true, // We force this field to be true to prevent considering failed transactions as non-checked
         };
         if (this.checkCancel(transactionMeta)) {
             newTransactionMeta.status = TransactionStatus.CANCELLED;
         }
+
         this.updateTransaction(newTransactionMeta);
         this.hub.emit(`${transactionMeta.id}:finished`, newTransactionMeta);
     }
@@ -368,7 +383,7 @@ export class TransactionController extends BaseController<
         waitForConfirmation = false
     ): Promise<Result> {
         const { chainId } = this._networkController.network;
-        const { transactions } = this.store.getState();
+        const transactions = [...this.store.getState().transactions];
 
         transaction.chainId = chainId;
         transaction = normalizeTransaction(transaction);
@@ -391,10 +406,11 @@ export class TransactionController extends BaseController<
                 );
             }
 
-            const hasPermission = this._permissionsController.accountHasPermissions(
-                origin,
-                transaction.from
-            );
+            const hasPermission =
+                this._permissionsController.accountHasPermissions(
+                    origin,
+                    transaction.from
+                );
 
             if (!hasPermission) {
                 throw new Error(
@@ -404,10 +420,8 @@ export class TransactionController extends BaseController<
         }
 
         // Determine transaction category and method signature
-        const {
-            transactionCategory,
-            methodSignature,
-        } = await this.determineTransactionCategory(transaction);
+        const { transactionCategory, methodSignature } =
+            await this.determineTransactionCategory(transaction);
 
         let transactionMeta: TransactionMeta = {
             id: uuid(),
@@ -421,6 +435,7 @@ export class TransactionController extends BaseController<
             verifiedOnBlockchain: false,
             loadingGasValues: true,
             blocksDropCount: 0,
+            metaType: MetaType.REGULAR,
         };
 
         try {
@@ -432,7 +447,10 @@ export class TransactionController extends BaseController<
             transactionMeta.gasEstimationFailed = !estimationSucceeded;
 
             // Get default gas prices values
-            transactionMeta = await this.getGasPricesValues(transactionMeta);
+            transactionMeta = await this.getGasPricesValues(
+                transactionMeta,
+                chainId
+            );
 
             transactionMeta.loadingGasValues = false;
         } catch (error) {
@@ -446,6 +464,7 @@ export class TransactionController extends BaseController<
         );
 
         transactions.push(transactionMeta);
+
         this.store.updateState({
             transactions: this.trimTransactionsForState(transactions),
         });
@@ -453,22 +472,60 @@ export class TransactionController extends BaseController<
         return { result, transactionMeta };
     }
 
-    private async getGasPricesValues(transactionMeta: TransactionMeta) {
-        transactionMeta = await this._gasPricesController.addTransactionGasPriceDefault(
-            transactionMeta
-        );
+    private async getGasPricesValues(
+        transactionMeta: TransactionMeta,
+        chainId?: number
+    ) {
+        const chainIsEIP1559Compatible =
+            await this._networkController.getEIP1559Compatibility(chainId);
+        const feeData = this._gasPricesController.getFeeData(chainId);
 
-        transactionMeta = await this._gasPricesController.addTransactionMaxFeePerGasDefault(
-            transactionMeta
-        );
+        if (chainIsEIP1559Compatible) {
+            // Max fee per gas
+            if (!transactionMeta.transactionParams.maxFeePerGas) {
+                if (feeData.maxFeePerGas) {
+                    transactionMeta.transactionParams.maxFeePerGas =
+                        BigNumber.from(feeData.maxFeePerGas);
+                }
+            }
 
-        transactionMeta = await this._gasPricesController.addTransactionMaxPriorityFeePerGasDefault(
-            transactionMeta
-        );
+            // Max priority fee per gas
+            if (!transactionMeta.transactionParams.maxPriorityFeePerGas) {
+                if (feeData.maxPriorityFeePerGas) {
+                    transactionMeta.transactionParams.maxPriorityFeePerGas =
+                        BigNumber.from(feeData.maxPriorityFeePerGas);
+                }
+            }
+        } else {
+            // Gas price
+            if (!transactionMeta.transactionParams.gasPrice) {
+                if (feeData.gasPrice) {
+                    transactionMeta.transactionParams.gasPrice = BigNumber.from(
+                        feeData.gasPrice
+                    );
+                }
+            }
+        }
 
-        transactionMeta = await this._gasPricesController.transformLegacyGasPriceToEIP1559FeeData(
-            transactionMeta
-        );
+        /**
+         * Checks if the network is compatible with EIP1559 but the
+         * the transaction is legacy and then Transforms the gas configuration
+         * of the legacy transaction to the EIP1559 fee data.
+         */
+        if (chainIsEIP1559Compatible) {
+            if (
+                getTransactionType(transactionMeta.transactionParams) !=
+                TransactionType.FEE_MARKET_EIP1559
+            ) {
+                // Legacy transaction support: https://hackmd.io/@q8X_WM2nTfu6nuvAzqXiTQ/1559-wallets#Legacy-Transaction-Support
+                transactionMeta.transactionParams.maxPriorityFeePerGas =
+                    transactionMeta.transactionParams.gasPrice;
+                transactionMeta.transactionParams.maxFeePerGas =
+                    transactionMeta.transactionParams.gasPrice;
+                transactionMeta.transactionParams.gasPrice = undefined;
+            }
+        }
+
         return transactionMeta;
     }
 
@@ -478,8 +535,7 @@ export class TransactionController extends BaseController<
     ): Promise<string> {
         return new Promise((resolve, reject) => {
             this.hub.once(
-                `${transactionMetaId}:${
-                    !waitForConfirmation ? 'finished' : 'confirmed'
+                `${transactionMetaId}:${!waitForConfirmation ? 'finished' : 'confirmed'
                 }`,
                 (meta: TransactionMeta) => {
                     switch (meta.status) {
@@ -524,7 +580,8 @@ export class TransactionController extends BaseController<
                 gasLimit: transactionParams.gasLimit?.toHexString(),
                 gasPrice: transactionParams.gasPrice?.toHexString(),
                 maxFeePerGas: transactionParams.maxFeePerGas?.toHexString(),
-                maxPriorityFeePerGas: transactionParams.maxPriorityFeePerGas?.toHexString(),
+                maxPriorityFeePerGas:
+                    transactionParams.maxPriorityFeePerGas?.toHexString(),
                 nonce: transactionParams.nonce,
                 value: transactionParams.value?.toHexString(),
                 to: transactionParams.to,
@@ -544,11 +601,18 @@ export class TransactionController extends BaseController<
     public async approveTransaction(transactionID: string): Promise<void> {
         const releaseLock = await this.mutex.acquire();
         const { chainId } = this._networkController.network;
-        const provider = this._networkController.getProvider();
+
         let transactionMeta = this.getTransaction(transactionID);
+        let provider: StaticJsonRpcProvider;
 
         if (!transactionMeta) {
             throw new Error('The specified transaction does not exist');
+        }
+
+        if (transactionMeta.flashbots && chainId == 1) {
+            provider = this._networkController.getFlashbotsProvider();
+        } else {
+            provider = this._networkController.getProvider();
         }
 
         transactionMeta = { ...transactionMeta };
@@ -587,13 +651,13 @@ export class TransactionController extends BaseController<
 
             const txParams = isEIP1559
                 ? {
-                      ...baseTxParams,
-                      maxFeePerGas:
-                          transactionMeta.transactionParams.maxFeePerGas,
-                      maxPriorityFeePerGas:
-                          transactionMeta.transactionParams
-                              .maxPriorityFeePerGas,
-                  }
+                    ...baseTxParams,
+                    maxFeePerGas:
+                        transactionMeta.transactionParams.maxFeePerGas,
+                    maxPriorityFeePerGas:
+                        transactionMeta.transactionParams
+                            .maxPriorityFeePerGas,
+                }
                 : baseTxParams;
 
             // delete gasPrice if maxFeePerGas and maxPriorityFeePerGas are set
@@ -647,7 +711,7 @@ export class TransactionController extends BaseController<
      * @param transactionMeta The transaction to submit
      */
     private async submitTransaction(
-        provider: InfuraProvider | JsonRpcProvider,
+        provider: StaticJsonRpcProvider,
         transactionMeta: TransactionMeta,
         forceSubmitted = false
     ) {
@@ -723,6 +787,7 @@ export class TransactionController extends BaseController<
         const transactions = this.store
             .getState()
             .transactions.filter(({ id }) => id !== transactionID);
+
         this.store.updateState({
             transactions: this.trimTransactionsForState(transactions),
         });
@@ -758,7 +823,7 @@ export class TransactionController extends BaseController<
     ): Promise<void> {
         const provider = this._networkController.getProvider();
 
-        const { transactions } = this.store.getState();
+        const transactions = [...this.store.getState().transactions];
 
         if (gasValues) {
             validateGasValues(gasValues);
@@ -768,6 +833,19 @@ export class TransactionController extends BaseController<
             throw new Error('The specified transaction does not exist');
         }
 
+        const oldTransactionI = transactions.indexOf(transactionMeta);
+
+        if (oldTransactionI === -1) {
+            throw new Error("Can't find the old transaction index");
+        }
+
+        transactions[oldTransactionI].metaType = MetaType.CANCELLING;
+
+        // Update state a first time so even if the rest fail
+        // We are sure the transaction was supposed to be cancelled
+        this.store.updateState({
+            transactions: this.trimTransactionsForState(transactions),
+        });
         // Get transaction type
         const type = getTransactionType(transactionMeta.transactionParams);
 
@@ -800,8 +878,8 @@ export class TransactionController extends BaseController<
             };
         } else {
             // maxFeePerGas (EIP1559)
-            const existingMaxFeePerGas = transactionMeta.transactionParams
-                .maxFeePerGas!;
+            const existingMaxFeePerGas =
+                transactionMeta.transactionParams.maxFeePerGas!;
             const minMaxFeePerGas = BnMultiplyByFraction(
                 existingMaxFeePerGas,
                 CANCEL_RATE.numerator,
@@ -820,8 +898,8 @@ export class TransactionController extends BaseController<
                 minMaxFeePerGas;
 
             // maxPriorityFeePerGas (EIP1559)
-            const existingMaxPriorityFeePerGas = transactionMeta
-                .transactionParams.maxPriorityFeePerGas!;
+            const existingMaxPriorityFeePerGas =
+                transactionMeta.transactionParams.maxPriorityFeePerGas!;
             const minMaxPriorityFeePerGas = BnMultiplyByFraction(
                 existingMaxPriorityFeePerGas,
                 CANCEL_RATE.numerator,
@@ -877,6 +955,7 @@ export class TransactionController extends BaseController<
         };
 
         transactions.push(newTransactionMeta);
+
         this.store.updateState({
             transactions: this.trimTransactionsForState(transactions),
         });
@@ -900,12 +979,25 @@ export class TransactionController extends BaseController<
             validateGasValues(gasValues);
         }
         const transactionMeta = this.getTransaction(transactionID);
-
         if (!transactionMeta) {
             throw new Error('The specified transaction does not exist');
         }
 
-        const { transactions } = this.store.getState();
+        const transactions = [...this.store.getState().transactions];
+
+        const oldTransactionI = transactions.indexOf(transactionMeta);
+
+        if (oldTransactionI === -1) {
+            throw new Error("Can't find the old transaction index");
+        }
+
+        transactions[oldTransactionI].metaType = MetaType.SPEEDING_UP;
+
+        // Updating a first time so even if the rest failed
+        // We know the transaction was supposed to be speed up
+        this.store.updateState({
+            transactions: this.trimTransactionsForState(transactions),
+        });
 
         const type = getTransactionType(transactionMeta.transactionParams);
 
@@ -932,8 +1024,8 @@ export class TransactionController extends BaseController<
             };
         } else {
             // maxFeePerGas (EIP1559)
-            const existingMaxFeePerGas = transactionMeta.transactionParams
-                .maxFeePerGas!;
+            const existingMaxFeePerGas =
+                transactionMeta.transactionParams.maxFeePerGas!;
             const minMaxFeePerGas = BnMultiplyByFraction(
                 existingMaxFeePerGas,
                 SPEED_UP_RATE.numerator,
@@ -950,8 +1042,8 @@ export class TransactionController extends BaseController<
                 minMaxFeePerGas;
 
             // maxPriorityFeePerGas (EIP1559)
-            const existingMaxPriorityFeePerGas = transactionMeta
-                .transactionParams.maxPriorityFeePerGas!;
+            const existingMaxPriorityFeePerGas =
+                transactionMeta.transactionParams.maxPriorityFeePerGas!;
             const minMaxPriorityFeePerGas = BnMultiplyByFraction(
                 existingMaxPriorityFeePerGas,
                 SPEED_UP_RATE.numerator,
@@ -1016,37 +1108,36 @@ export class TransactionController extends BaseController<
     public async queryTransactionStatuses(
         currentBlockNumber: number
     ): Promise<void> {
-        const { transactions } = this.store.getState();
+        const transactions = [...this.store.getState().transactions];
         const { chainId } = this._networkController.network;
 
-        let gotUpdates = false;
         await runPromiseSafely(
             Promise.all(
-                transactions.map(async (meta, index) => {
+                transactions.map(async (meta) => {
                     const txBelongsToCurrentChain = meta.chainId === chainId;
 
                     if (!meta.verifiedOnBlockchain && txBelongsToCurrentChain) {
-                        const [
-                            reconciledTx,
-                            updateRequired,
-                        ] = await this.blockchainTransactionStateReconciler(
-                            meta,
-                            currentBlockNumber
-                        );
+                        const [reconciledTx, updateRequired] =
+                            await this.blockchainTransactionStateReconciler(
+                                meta,
+                                currentBlockNumber
+                            );
                         if (updateRequired) {
-                            transactions[index] = reconciledTx;
-                            gotUpdates = updateRequired;
+                            const newTransactions = [
+                                ...this.store.getState().transactions,
+                            ];
+                            const tx = newTransactions.indexOf(meta);
+                            if (tx) {
+                                newTransactions[tx] = reconciledTx;
+                                this.store.updateState({
+                                    transactions: newTransactions,
+                                });
+                            }
                         }
                     }
                 })
             )
         );
-
-        if (gotUpdates) {
-            this.store.updateState({
-                transactions: this.trimTransactionsForState(transactions),
-            });
-        }
     }
 
     /**
@@ -1055,11 +1146,12 @@ export class TransactionController extends BaseController<
      * @param transactionMeta - The new transaction to store in state.
      */
     public updateTransaction(transactionMeta: TransactionMeta): void {
-        const { transactions } = this.store.getState();
+        const transactions = [...this.store.getState().transactions];
         transactionMeta.transactionParams = normalizeTransaction(
             transactionMeta.transactionParams
         );
         validateTransaction(transactionMeta.transactionParams);
+
         const index = transactions.findIndex(
             ({ id }) => transactionMeta.id === id
         );
@@ -1070,6 +1162,7 @@ export class TransactionController extends BaseController<
         // Update transaction
         const { status: oldStatus } = transactions[index];
         transactions[index] = transactionMeta;
+
         this.store.updateState({
             transactions: this.trimTransactionsForState(transactions),
         });
@@ -1159,7 +1252,8 @@ export class TransactionController extends BaseController<
         transactions: TransactionMeta[]
     ): TransactionMeta[] {
         const nonceNetworkSet = new Set();
-        const txsToKeep = transactions.reverse().filter((tx) => {
+
+        const txsToKeep = reverse(transactions).filter((tx) => {
             const { chainId, status, transactionParams, time } = tx;
             if (transactionParams) {
                 const key = `${transactionParams.nonce}-${chainId}-${new Date(
@@ -1177,8 +1271,8 @@ export class TransactionController extends BaseController<
             }
             return false;
         });
-        txsToKeep.reverse();
-        return txsToKeep;
+
+        return reverse(txsToKeep);
     }
 
     /**
@@ -1189,7 +1283,7 @@ export class TransactionController extends BaseController<
         return !!transactions.find(
             (t) =>
                 t.transactionParams.nonce ===
-                    transaction.transactionParams.nonce &&
+                transaction.transactionParams.nonce &&
                 compareAddresses(
                     t.transactionParams.from,
                     transaction.transactionParams.from
@@ -1222,90 +1316,77 @@ export class TransactionController extends BaseController<
      */
     private async blockchainTransactionStateReconciler(
         meta: TransactionMeta,
-        currentBlockNumber: number
+        currentBlockNumber: number,
+        ignoreFlashbots = false
     ): Promise<[TransactionMeta, boolean]> {
-        const { status } = meta;
+        const { status, flashbots } = meta;
         const { hash: transactionHash } = meta.transactionParams;
         const provider = this._networkController.getProvider();
 
         switch (status) {
+            case TransactionStatus.FAILED:
             case TransactionStatus.CONFIRMED:
-                const txReceipt = await provider.getTransactionReceipt(
-                    transactionHash!
+                // Here we check again up to the default confirmation number after the transaction
+                // was confirmed or failed for the first time, that its status remains the same.
+                return this.verifyConfirmedTransactionOnBlockchain(
+                    meta,
+                    provider,
+                    transactionHash!,
+                    currentBlockNumber
                 );
-
-                if (!txReceipt) {
-                    return [meta, false];
-                }
-
-                meta.verifiedOnBlockchain = true;
-                meta.transactionReceipt = txReceipt;
-
-                // According to the Web3 docs:
-                // TRUE if the transaction was successful, FALSE if the EVM reverted the transaction.
-                if (Number(txReceipt.status) === 0) {
-                    const error: Error = new Error(
-                        'Transaction failed. The transaction was reversed'
-                    );
-
-                    this.failTransaction(meta, error);
-                    return [meta, false];
-                }
-
-                // Transaction was confirmed, check if this transaction
-                // replaced another one and transition it to failed
-                const { transactions } = this.store.getState();
-                [...transactions].forEach((t) => {
-                    if (
-                        t.transactionParams.nonce ===
-                            meta.transactionParams.nonce &&
-                        t.id !== meta.id &&
-                        compareAddresses(
-                            t.transactionParams.from,
-                            meta.transactionParams.from
-                        )
-                    ) {
-                        // If nonce is the same but id isn't, the transaction was replaced
-                        this.failTransaction(
-                            t,
-                            new Error(
-                                'Transaction failed. The transaction was dropped or replaced by a new one'
-                            ),
-                            true
-                        );
-                    }
-                });
-
-                return [meta, true];
             case TransactionStatus.SUBMITTED:
-                const txObj = await provider.getTransaction(transactionHash!);
-
-                if (!txObj) {
-                    const receiptShowsFailedStatus = await this.checkTxReceiptStatusIsFailed(
-                        transactionHash,
-                        provider
+                if (flashbots && !ignoreFlashbots) {
+                    return this._updateSubmittedFlashbotsTransaction(
+                        meta,
+                        currentBlockNumber
                     );
-
-                    // Case the txObj is evaluated as false, a second check will
-                    // determine if the tx failed or it is pending or confirmed
-                    if (receiptShowsFailedStatus) {
-                        const error: Error = new Error(
-                            'Transaction failed. The transaction was dropped or replaced by a new one'
-                        );
-
-                        this.failTransaction(meta, error, true);
-                        return [meta, false];
-                    }
                 }
+
+                const txObj = await provider.getTransaction(transactionHash!);
 
                 if (txObj?.blockNumber) {
                     // If transaction is a Blank deposit, wait for the N confirmations required
+                    // and treat them a bit different than the rest of the transactions, checking
+                    // if it was reverted right after the confirmation amount is reached
                     if (meta.blankDepositId) {
                         if (
                             currentBlockNumber - txObj.blockNumber! <
                             DEFAULT_TORNADO_CONFIRMATION
                         ) {
                             return [meta, false];
+                        } else {
+                            const [, validated] =
+                                await this.verifyConfirmedTransactionOnBlockchain(
+                                    meta,
+                                    provider,
+                                    transactionHash!,
+                                    currentBlockNumber
+                                );
+
+                            if (!validated) {
+                                return [meta, false];
+                            }
+                        }
+                    } else {
+                        // If we can fetch the receipt and check the status beforehand, we just fail
+                        // the transaction without verifying it again for better UX (otherwise transaction will be
+                        // displayed as confirmed and then as failed right after)
+                        const [txReceipt, success] =
+                            await this.checkTransactionReceiptStatus(
+                                transactionHash,
+                                provider
+                            );
+
+                        if (txReceipt) {
+                            meta.transactionReceipt = txReceipt;
+                            if (success === false) {
+                                const error: Error = new Error(
+                                    'Transaction failed. The transaction was reverted by the EVM'
+                                );
+
+                                this.failTransaction(meta, error);
+                                return [meta, false];
+                            }
                         }
                     }
 
@@ -1313,8 +1394,10 @@ export class TransactionController extends BaseController<
                     meta.confirmationTime =
                         txObj.timestamp && txObj.timestamp * 1000; // Unix timestamp to Java Script timestamp
 
+                    // Emit confirmation events
                     this.emit(TransactionEvents.STATUS_UPDATE, meta);
                     this.hub.emit(`${meta.id}:confirmed`, meta);
+
                     return [meta, true];
                 }
 
@@ -1343,6 +1426,92 @@ export class TransactionController extends BaseController<
     }
 
     /**
+     * Verifies that a recently confirmed transaction does not have a reverted
+     * status, attaches the transaction receipt to it, and
+     * checks whether it replaced another transaction in the list
+     *
+     * @param meta The transaction that got confirmed
+     * @param provider The ethereum provider
+     * @param transactionHash The transaction hash
+     */
+    private verifyConfirmedTransactionOnBlockchain = async (
+        meta: TransactionMeta,
+        provider: StaticJsonRpcProvider,
+        transactionHash: string,
+        currentBlockNumber: number
+    ): Promise<[TransactionMeta, boolean]> => {
+        const [txReceipt, success] = await this.checkTransactionReceiptStatus(
+            transactionHash,
+            provider
+        );
+
+        if (!txReceipt) {
+            // If this is not a deposit transaction and the originally confirmed transaction
+            // was marked as confirmed, but at this instance we do not have a txReceipt we have got
+            // to mark the transaction as pending again, as it could have been put back to the mempool
+            if (!meta.blankDepositId) {
+                meta.status = TransactionStatus.SUBMITTED;
+                meta.confirmationTime = undefined;
+                return [meta, true];
+            }
+            return [meta, false];
+        }
+
+        // If this is not a deposit transaction that we want to explicitly
+        // display the pending status before actually confirming, we check
+        // that the amount of blocks that have passed since we marked it as
+        // confirmed has reached the `DEFAULT_TRANSACTION_CONFIRMATIONS` number
+        // before setting it to `verifiedOnBlockchain`
+        if (!meta.blankDepositId) {
+            if (
+                currentBlockNumber - txReceipt.blockNumber! <
+                DEFAULT_TRANSACTION_CONFIRMATIONS
+            ) {
+                return [meta, false];
+            }
+        }
+
+        meta.verifiedOnBlockchain = true;
+        meta.transactionReceipt = txReceipt;
+
+        // According to the Web3 docs:
+        // TRUE if the transaction was successful, FALSE if the EVM reverted the transaction.
+        if (!success) {
+            const error: Error = new Error(
+                'Transaction failed. The transaction was reverted by the EVM'
+            );
+
+            this.failTransaction(meta, error);
+            return [meta, false];
+        }
+
+        // Transaction was confirmed, check if this transaction
+        // replaced another one and transition it to failed
+        const { transactions } = this.store.getState();
+        [...transactions].forEach((t) => {
+            if (
+                t.transactionParams.nonce === meta.transactionParams.nonce &&
+                t.id !== meta.id &&
+                compareAddresses(
+                    t.transactionParams.from,
+                    meta.transactionParams.from
+                )
+            ) {
+                // If nonce is the same but id isn't, the transaction was replaced
+                this.failTransaction(
+                    t,
+                    new Error(
+                        'Transaction failed. The transaction was dropped or replaced by a new one'
+                    ),
+                    true
+                );
+            }
+        });
+
+        return [meta, true];
+    };
+
+    /**
      * Gets a transaction from the transactions list
      *
      * @param {number} transactionId
@@ -1354,24 +1523,70 @@ export class TransactionController extends BaseController<
     }
 
     /**
-     * Method to check if a tx has failed according to their receipt
+     * Updates a submitted flashbots transaction, through the flashbots
+     * pending transaction status API
+     * https://docs.flashbots.net/flashbots-protect/rpc/status-api
+     *
+     * Checks the status of the transaction and then continues with the
+     * normal reconciliation process if needed
+     */
+    private async _updateSubmittedFlashbotsTransaction(
+        meta: TransactionMeta,
+        currentBlocknumber: number
+    ): Promise<[TransactionMeta, boolean]> {
+        const baseUrl = 'https://protect.flashbots.net/tx/';
+
+        const response = await axios.get(baseUrl + meta.transactionParams.hash);
+
+        if (response.data) {
+            const { status } = response.data;
+
+            if (status === 'INCLUDED') {
+                return this.blockchainTransactionStateReconciler(
+                    meta,
+                    currentBlocknumber,
+                    true // ignore flashbots
+                );
+            } else if (status === 'FAILED') {
+                // Flashbots API defines dropped transactions as failed
+                meta.status = TransactionStatus.DROPPED;
+                return [meta, true];
+            } else if (status === 'PENDING') {
+                return [meta, false];
+            } else {
+                return this.blockchainTransactionStateReconciler(
+                    meta,
+                    currentBlocknumber,
+                    true // ignore flashbots
+                );
+            }
+        }
+
+        return [meta, false];
+    }
+
+    /**
+     * Method to retrieve a transaction receipt and check if its status
+     * indicates that it has been reverted.
+     *
      * According to the Web3 docs:
      * TRUE if the transaction was successful, FALSE if the EVM reverted the transaction.
      * The receipt is not available for pending transactions and returns null.
      *
      * @param txHash - The transaction hash.
-     * @returns Whether the transaction has failed.
+     * @returns A tuple with the receipt and an indicator of transaction success.
      */
-    private async checkTxReceiptStatusIsFailed(
+    private async checkTransactionReceiptStatus(
         txHash: string | undefined,
-        provider: InfuraProvider | JsonRpcProvider
-    ): Promise<boolean> {
+        provider: StaticJsonRpcProvider
+    ): Promise<[TransactionReceipt | null, boolean | undefined]> {
         const txReceipt = await provider.getTransactionReceipt(txHash!);
+
         if (!txReceipt) {
-            // Transaction is pending
-            return false;
+            return [null, undefined];
         }
-        return Number(txReceipt.status) === 0;
+
+        return [txReceipt, Number(txReceipt.status) === 1];
     }
 
     /**
@@ -1398,34 +1613,30 @@ export class TransactionController extends BaseController<
             return { gasLimit: providedGasLimit, estimationSucceeded: true };
         }
 
-        const {
-            gasLimit: blockGasLimit,
-        } = await this._networkController.getLatestBlock();
+        const { blockGasLimit } = this._gasPricesController.getState();
 
         // 2. If to is not defined or this is not a contract address, and there is no data (i.e. the transaction is of type SENT_ETHER) use SEND_GAS_COST (0x5208 or 21000).
         // If the network is a custom network then bypass this check and fetch 'estimateGas'.
 
         if (typeof transactionMeta.transactionCategory === 'undefined') {
             // If estimateGas was called with no transaction category, determine it
-            const {
-                transactionCategory,
-            } = await this.determineTransactionCategory(
-                transactionMeta.transactionParams
-            );
+            const { transactionCategory } =
+                await this.determineTransactionCategory(
+                    transactionMeta.transactionParams
+                );
             transactionMeta.transactionCategory = transactionCategory;
         }
 
         // Check if it's a custom chainId
         const txOrCurrentChainId =
             transactionMeta.chainId ?? this._networkController.network.chainId;
-        const isCustomNetwork = this._networkController.isChainIdCustomNetwork(
-            txOrCurrentChainId
-        );
+        const isCustomNetwork =
+            this._networkController.isChainIdCustomNetwork(txOrCurrentChainId);
 
         if (
             !isCustomNetwork &&
             transactionMeta.transactionCategory ===
-                TransactionCategories.SENT_ETHER
+            TransactionCategories.SENT_ETHER
         ) {
             return {
                 gasLimit: BigNumber.from(SEND_GAS_COST),
@@ -1513,7 +1724,7 @@ export class TransactionController extends BaseController<
             .transactions.filter(
                 (t) =>
                     t.transactionCategory ===
-                        TransactionCategories.BLANK_DEPOSIT &&
+                    TransactionCategories.BLANK_DEPOSIT &&
                     t.status !== TransactionStatus.UNAPPROVED &&
                     t.chainId === fromChainId
             );
@@ -1575,9 +1786,8 @@ export class TransactionController extends BaseController<
                     const bytesSignature = data!.slice(0, 10);
 
                     // Lookup on signature registry contract
-                    const unparsedSignature = await this._signatureRegistry.lookup(
-                        bytesSignature
-                    );
+                    const unparsedSignature =
+                        await this._signatureRegistry.lookup(bytesSignature);
 
                     // If there was a response, parse the signature
                     methodSignature = unparsedSignature
@@ -1590,6 +1800,21 @@ export class TransactionController extends BaseController<
         }
 
         return { transactionCategory: result, methodSignature };
+    }
+
+
+    /**
+     * Returns the next nonce without locking to be displayed as reference on advanced settings modal.
+     * @param address to calculate the nonce
+     * @returns nonce number
+     */
+    public async getNextNonce(address: string): Promise<number | undefined> {
+        address = toChecksumAddress(address);
+        if (!isValidAddress(address)) {
+            return undefined;
+        }
+
+        return this._nonceTracker.getHighestContinousNextNonce(address);
     }
 }
 

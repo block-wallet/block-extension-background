@@ -9,6 +9,7 @@ const initialNetworkControllerState: NetworkControllerState = {
     isNetworkChanging: false,
     isUserNetworkOnline: true,
     isProviderNetworkOnline: true,
+    isEIP1559Compatible: {},
 };
 
 const getNetworkControllerInstance = () =>

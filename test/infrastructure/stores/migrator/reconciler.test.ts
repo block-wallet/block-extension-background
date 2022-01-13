@@ -50,11 +50,29 @@ const persistedState = {
     },
     GasPricesController: {
         gasPriceData: {
-            5: {
-                gasPrices: {
-                    average: BigNumber.from('2000000000'),
-                    fast: BigNumber.from('2000000000'),
-                    slow: BigNumber.from('2000000000'),
+            1: {
+                blockGasLimit: BigNumber.from(0),
+                gasPricesLevels: {
+                    average: {
+                        gasPrice: null,
+                        maxFeePerGas: null,
+                        maxPriorityFeePerGas: null,
+                    },
+                    fast: {
+                        gasPrice: null,
+                        maxFeePerGas: null,
+                        maxPriorityFeePerGas: null,
+                    },
+                    slow: {
+                        gasPrice: null,
+                        maxFeePerGas: null,
+                        maxPriorityFeePerGas: null,
+                    },
+                },
+                feeData: {
+                    gasPrice: null,
+                    maxFeePerGas: null,
+                    maxPriorityFeePerGas: null,
                 },
             },
         },
@@ -84,6 +102,7 @@ const persistedState = {
         isNetworkChanging: false,
         isUserNetworkOnline: true,
         isProviderNetworkOnline: true,
+        isEIP1559Compatible: {},
     },
     TransactionController: { transactions: [] },
     BlockUpdatesController: { blockData: { 5: -1 } },
@@ -93,7 +112,9 @@ const initialState: BlankAppState & {
     OnboardingController: { newAddedKeyOnLevel2: boolean };
     PreferencesController: { newAddedKeyOnLevel2: string };
 } = {
-    BlockUpdatesController: { blockData: { 5: -1 } },
+    BlockUpdatesController: {
+        blockData: { 5: { blockNumber: -1, updateCounter: -1 } },
+    },
     AddressBookController: {
         addressBook: {} as AddressBook,
         recentAddresses: {} as AddressBook,
@@ -122,6 +143,7 @@ const initialState: BlankAppState & {
         isNetworkChanging: false,
         isUserNetworkOnline: true,
         isProviderNetworkOnline: true,
+        isEIP1559Compatible: {},
     },
     OnboardingController: {
         isOnboarded: false,
@@ -157,11 +179,24 @@ const initialState: BlankAppState & {
     },
     GasPricesController: {
         gasPriceData: {
-            5: {
-                gasPrices: {
-                    average: { gasPrice: BigNumber.from(0) },
-                    fast: { gasPrice: BigNumber.from(0) },
-                    slow: { gasPrice: BigNumber.from(0) },
+            1: {
+                blockGasLimit: BigNumber.from(0),
+                gasPricesLevels: {
+                    average: {
+                        gasPrice: null,
+                        maxFeePerGas: null,
+                        maxPriorityFeePerGas: null,
+                    },
+                    fast: {
+                        gasPrice: null,
+                        maxFeePerGas: null,
+                        maxPriorityFeePerGas: null,
+                    },
+                    slow: {
+                        gasPrice: null,
+                        maxFeePerGas: null,
+                        maxPriorityFeePerGas: null,
+                    },
                 },
             },
         },
@@ -223,11 +258,29 @@ describe('State reconciler', () => {
             },
             GasPricesController: {
                 gasPriceData: {
-                    5: {
-                        gasPrices: {
-                            average: BigNumber.from('2000000000'),
-                            fast: BigNumber.from('2000000000'),
-                            slow: BigNumber.from('2000000000'),
+                    1: {
+                        blockGasLimit: BigNumber.from(0),
+                        gasPricesLevels: {
+                            average: {
+                                gasPrice: null,
+                                maxFeePerGas: null,
+                                maxPriorityFeePerGas: null,
+                            },
+                            fast: {
+                                gasPrice: null,
+                                maxFeePerGas: null,
+                                maxPriorityFeePerGas: null,
+                            },
+                            slow: {
+                                gasPrice: null,
+                                maxFeePerGas: null,
+                                maxPriorityFeePerGas: null,
+                            },
+                        },
+                        feeData: {
+                            gasPrice: null,
+                            maxFeePerGas: null,
+                            maxPriorityFeePerGas: null,
                         },
                     },
                 },
@@ -255,6 +308,7 @@ describe('State reconciler', () => {
                 isNetworkChanging: false,
                 isUserNetworkOnline: true,
                 isProviderNetworkOnline: true,
+                isEIP1559Compatible: {},
             },
             PreferencesController: {
                 localeInfo: 'en-GB',

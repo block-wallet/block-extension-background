@@ -1,14 +1,18 @@
 import initialState from '@blank/background/utils/constants/initialState';
 import { expect } from 'chai';
 import { BigNumber } from 'ethers';
-import { GasPricesController } from '../../src/controllers/GasPricesController';
+import {
+    GasPriceData,
+    GasPriceLevels,
+    GasPricesController,
+} from '../../src/controllers/GasPricesController';
 import NetworkController from '../../src/controllers/NetworkController';
 import sinon from 'sinon';
-import {
-    TransactionMeta,
-    TransactionStatus,
-} from '@blank/background/controllers/transactions/utils/types';
 import { getNetworkControllerInstance } from '../mocks/mock-network-instance';
+import { Network } from '@blank/background/utils/constants/networks';
+import { it } from 'mocha';
+import { Block, FeeData } from '@ethersproject/abstract-provider';
+import axios from 'axios';
 
 describe('GasPrices Controller', () => {
     let gasPricesController: GasPricesController;
@@ -25,505 +29,1480 @@ describe('GasPrices Controller', () => {
         sinon.restore();
     });
 
-    it('Should update the gas prices due to expiration policy', async () => {
-        sinon.stub(gasPricesController, 'getEIP1599GasPriceLevels').returns(
-            Promise.resolve({
+    describe('Updating gas prices', async () => {
+        it('Should update the gas prices due to expiration policy', async () => {
+            sinon
+                .stub(networkController, 'getEIP1559Compatibility')
+                .returns(new Promise((resolve) => resolve(true)));
+
+            sinon.stub(gasPricesController as any, '_fetchFeeData').returns(
+                Promise.resolve({
+                    slow: {
+                        maxFeePerGas: BigNumber.from('101'),
+                        maxPriorityFeePerGas: BigNumber.from('102'),
+                    },
+                    average: {
+                        maxFeePerGas: BigNumber.from('103'),
+                        maxPriorityFeePerGas: BigNumber.from('104'),
+                    },
+                    fast: {
+                        maxFeePerGas: BigNumber.from('105'),
+                        maxPriorityFeePerGas: BigNumber.from('106'),
+                    },
+                })
+            );
+
+            (gasPricesController as any).expiration = 1616620739553;
+
+            await gasPricesController.updateGasPrices(1, 5);
+
+            const { gasPricesLevels: gasPrices } =
+                gasPricesController.store.getState().gasPriceData[5];
+
+            expect(gasPrices.slow.maxFeePerGas!.toString()).to.be.equal('101');
+            expect(gasPrices.slow.maxPriorityFeePerGas!.toString()).to.be.equal(
+                '102'
+            );
+            expect(gasPrices.average.maxFeePerGas!.toString()).to.be.equal(
+                '103'
+            );
+            expect(
+                gasPrices.average.maxPriorityFeePerGas!.toString()
+            ).to.be.equal('104');
+            expect(gasPrices.fast.maxFeePerGas!.toString()).to.be.equal('105');
+            expect(gasPrices.fast.maxPriorityFeePerGas!.toString()).to.be.equal(
+                '106'
+            );
+        });
+
+        it('Should not update the legacy gas prices due to policy', async () => {
+            sinon
+                .stub(networkController, 'getEIP1559Compatibility')
+                .returns(new Promise((resolve) => resolve(false)));
+
+            gasPricesController.store.setState({
+                gasPriceData: {
+                    5: {
+                        blockGasLimit: BigNumber.from(0),
+                        gasPricesLevels: {
+                            average: {
+                                gasPrice: BigNumber.from('181000000000'),
+                                maxFeePerGas: null,
+                                maxPriorityFeePerGas: null,
+                            },
+                            fast: {
+                                gasPrice: BigNumber.from('165000000000'),
+                                maxFeePerGas: null,
+                                maxPriorityFeePerGas: null,
+                            },
+                            slow: {
+                                gasPrice: BigNumber.from('125000000000'),
+                                maxFeePerGas: null,
+                                maxPriorityFeePerGas: null,
+                            },
+                        },
+                    },
+                },
+            });
+
+            // Check for average change < 5%
+            const _fetchFeeDataStub = sinon.stub(
+                gasPricesController as any,
+                '_fetchFeeData'
+            );
+            _fetchFeeDataStub.returns(
+                Promise.resolve({
+                    average: { gasPrice: BigNumber.from('181000000001') },
+                    fast: { gasPrice: BigNumber.from('165000000000') },
+                    slow: { gasPrice: BigNumber.from('125000000000') },
+                })
+            );
+
+            await (gasPricesController as any).updateGasPrices(1, 5);
+            let { gasPricesLevels: gasPrices } =
+                gasPricesController.store.getState().gasPriceData[5];
+
+            expect(gasPrices.average.gasPrice!.toString()).to.be.equal(
+                '181000000000'
+            );
+            expect(gasPrices.fast.gasPrice!.toString()).to.be.equal(
+                '165000000000'
+            );
+            expect(gasPrices.slow.gasPrice!.toString()).to.be.equal(
+                '125000000000'
+            );
+
+            // Check for fast change
+            _fetchFeeDataStub.returns(
+                Promise.resolve({
+                    average: { gasPrice: BigNumber.from('181000000000') },
+                    fast: { gasPrice: BigNumber.from('165000000001') },
+                    slow: { gasPrice: BigNumber.from('125000000000') },
+                })
+            );
+
+            await (gasPricesController as any).updateGasPrices(1, 5);
+            gasPrices =
+                gasPricesController.store.getState().gasPriceData[5]
+                    .gasPricesLevels;
+
+            expect(gasPrices.average.gasPrice!.toString()).to.be.equal(
+                '181000000000'
+            );
+            expect(gasPrices.fast.gasPrice!.toString()).to.be.equal(
+                '165000000000'
+            );
+            expect(gasPrices.slow.gasPrice!.toString()).to.be.equal(
+                '125000000000'
+            );
+
+            // Check for slow change
+            _fetchFeeDataStub.returns(
+                Promise.resolve({
+                    average: { gasPrice: BigNumber.from('181000000000') },
+                    fast: { gasPrice: BigNumber.from('165000000000') },
+                    slow: { gasPrice: BigNumber.from('125000000001') },
+                })
+            );
+
+            await (gasPricesController as any).updateGasPrices(1, 5);
+            gasPrices =
+                gasPricesController.store.getState().gasPriceData[5]
+                    .gasPricesLevels;
+
+            expect(gasPrices.average.gasPrice!.toString()).to.be.equal(
+                '181000000000'
+            );
+            expect(gasPrices.fast.gasPrice!.toString()).to.be.equal(
+                '165000000000'
+            );
+            expect(gasPrices.slow.gasPrice!.toString()).to.be.equal(
+                '125000000000'
+            );
+        });
+
+        it('Should update the EIP1559 gas prices due to price variation policy', async () => {
+            sinon
+                .stub(networkController, 'getEIP1559Compatibility')
+                .returns(new Promise((resolve) => resolve(true)));
+
+            gasPricesController.store.setState({
+                gasPriceData: {
+                    5: {
+                        blockGasLimit: BigNumber.from(0),
+                        gasPricesLevels: {
+                            average: {
+                                maxPriorityFeePerGas:
+                                    BigNumber.from('181000000000'),
+                                maxFeePerGas: BigNumber.from('181000000000'),
+                                gasPrice: null,
+                            },
+                            fast: {
+                                maxPriorityFeePerGas:
+                                    BigNumber.from('165000000000'),
+                                maxFeePerGas: BigNumber.from('165000000000'),
+                                gasPrice: null,
+                            },
+                            slow: {
+                                maxPriorityFeePerGas:
+                                    BigNumber.from('125000000000'),
+                                maxFeePerGas: BigNumber.from('125000000000'),
+                                gasPrice: null,
+                            },
+                        },
+                    },
+                },
+            });
+
+            // Check for average change
+            const _fetchFeeDataStub = sinon.stub(
+                gasPricesController as any,
+                '_fetchFeeData'
+            );
+            _fetchFeeDataStub.returns(
+                Promise.resolve({
+                    average: {
+                        maxPriorityFeePerGas: BigNumber.from('201000000000'),
+                    },
+                    fast: {
+                        maxPriorityFeePerGas: BigNumber.from('165000000000'),
+                    },
+                    slow: {
+                        maxPriorityFeePerGas: BigNumber.from('125000000000'),
+                    },
+                })
+            );
+
+            await (gasPricesController as any).updateGasPrices(1, 5);
+
+            let gos =
+                gasPricesController.store.getState().gasPriceData[5]
+                    .gasPricesLevels;
+
+            let { gasPricesLevels: gasPrices } =
+                gasPricesController.store.getState().gasPriceData[5];
+
+            expect(
+                gasPrices.average.maxPriorityFeePerGas!.toString()
+            ).to.be.equal('201000000000');
+            expect(gasPrices.fast.maxPriorityFeePerGas!.toString()).to.be.equal(
+                '165000000000'
+            );
+            expect(gasPrices.slow.maxPriorityFeePerGas!.toString()).to.be.equal(
+                '125000000000'
+            );
+
+            // Check for fast change
+            _fetchFeeDataStub.returns(
+                Promise.resolve({
+                    average: {
+                        maxPriorityFeePerGas: BigNumber.from('201000000000'),
+                    },
+                    fast: {
+                        maxPriorityFeePerGas: BigNumber.from('185000000000'),
+                    },
+                    slow: {
+                        maxPriorityFeePerGas: BigNumber.from('125000000000'),
+                    },
+                })
+            );
+
+            await (gasPricesController as any).updateGasPrices(1, 5);
+            gasPrices =
+                gasPricesController.store.getState().gasPriceData[5]
+                    .gasPricesLevels;
+
+            expect(
+                gasPrices.average.maxPriorityFeePerGas!.toString()
+            ).to.be.equal('201000000000');
+            expect(gasPrices.fast.maxPriorityFeePerGas!.toString()).to.be.equal(
+                '185000000000'
+            );
+            expect(gasPrices.slow.maxPriorityFeePerGas!.toString()).to.be.equal(
+                '125000000000'
+            );
+
+            // Check for slow change
+            _fetchFeeDataStub.returns(
+                Promise.resolve({
+                    average: {
+                        maxPriorityFeePerGas: BigNumber.from('201000000000'),
+                    },
+                    fast: {
+                        maxPriorityFeePerGas: BigNumber.from('185000000000'),
+                    },
+                    slow: {
+                        maxPriorityFeePerGas: BigNumber.from('145000000000'),
+                    },
+                })
+            );
+
+            await (gasPricesController as any).updateGasPrices(1, 5);
+
+            gasPrices =
+                gasPricesController.store.getState().gasPriceData[5]
+                    .gasPricesLevels;
+
+            expect(
+                gasPrices.average.maxPriorityFeePerGas!.toString()
+            ).to.be.equal('201000000000');
+            expect(gasPrices.fast.maxPriorityFeePerGas!.toString()).to.be.equal(
+                '185000000000'
+            );
+            expect(gasPrices.slow.maxPriorityFeePerGas!.toString()).to.be.equal(
+                '145000000000'
+            );
+        });
+
+        it('Should not update the EIP1559 gas prices due to policy', async () => {
+            sinon
+                .stub(networkController, 'getEIP1559Compatibility')
+                .returns(new Promise((resolve) => resolve(true)));
+
+            gasPricesController.store.setState({
+                gasPriceData: {
+                    5: {
+                        blockGasLimit: BigNumber.from(0),
+                        gasPricesLevels: {
+                            average: {
+                                maxPriorityFeePerGas:
+                                    BigNumber.from('181000000000'),
+                                maxFeePerGas: BigNumber.from('181000000000'),
+                                gasPrice: null,
+                            },
+                            fast: {
+                                maxPriorityFeePerGas:
+                                    BigNumber.from('165000000000'),
+                                maxFeePerGas: BigNumber.from('165000000000'),
+                                gasPrice: null,
+                            },
+                            slow: {
+                                maxPriorityFeePerGas:
+                                    BigNumber.from('125000000000'),
+                                maxFeePerGas: BigNumber.from('125000000000'),
+                                gasPrice: null,
+                            },
+                        },
+                    },
+                },
+            });
+
+            // Check for average change < 5%
+            const _fetchFeeDataStub = sinon.stub(
+                gasPricesController as any,
+                '_fetchFeeData'
+            );
+            _fetchFeeDataStub.returns(
+                Promise.resolve({
+                    average: {
+                        maxPriorityFeePerGas: BigNumber.from('181000000001'),
+                    },
+                    fast: {
+                        maxPriorityFeePerGas: BigNumber.from('165000000000'),
+                    },
+                    slow: {
+                        maxPriorityFeePerGas: BigNumber.from('125000000000'),
+                    },
+                })
+            );
+
+            await (gasPricesController as any).updateGasPrices(1, 5);
+            let { gasPricesLevels: gasPrices } =
+                gasPricesController.store.getState().gasPriceData[5];
+
+            expect(
+                gasPrices.average.maxPriorityFeePerGas!.toString()
+            ).to.be.equal('181000000000');
+            expect(gasPrices.fast.maxPriorityFeePerGas!.toString()).to.be.equal(
+                '165000000000'
+            );
+            expect(gasPrices.slow.maxPriorityFeePerGas!.toString()).to.be.equal(
+                '125000000000'
+            );
+
+            // Check for fast change
+            _fetchFeeDataStub.returns(
+                Promise.resolve({
+                    average: {
+                        maxPriorityFeePerGas: BigNumber.from('181000000000'),
+                    },
+                    fast: {
+                        maxPriorityFeePerGas: BigNumber.from('165000000001'),
+                    },
+                    slow: {
+                        maxPriorityFeePerGas: BigNumber.from('125000000000'),
+                    },
+                })
+            );
+
+            await (gasPricesController as any).updateGasPrices(1, 5);
+            gasPrices =
+                gasPricesController.store.getState().gasPriceData[5]
+                    .gasPricesLevels;
+
+            expect(
+                gasPrices.average.maxPriorityFeePerGas!.toString()
+            ).to.be.equal('181000000000');
+            expect(gasPrices.fast.maxPriorityFeePerGas!.toString()).to.be.equal(
+                '165000000000'
+            );
+            expect(gasPrices.slow.maxPriorityFeePerGas!.toString()).to.be.equal(
+                '125000000000'
+            );
+
+            // Check for slow change
+            _fetchFeeDataStub.returns(
+                Promise.resolve({
+                    average: {
+                        maxPriorityFeePerGas: BigNumber.from('181000000000'),
+                    },
+                    fast: {
+                        maxPriorityFeePerGas: BigNumber.from('165000000000'),
+                    },
+                    slow: {
+                        maxPriorityFeePerGas: BigNumber.from('125000000001'),
+                    },
+                })
+            );
+
+            await (gasPricesController as any).updateGasPrices(1, 5);
+            gasPrices =
+                gasPricesController.store.getState().gasPriceData[5]
+                    .gasPricesLevels;
+
+            expect(
+                gasPrices.average.maxPriorityFeePerGas!.toString()
+            ).to.be.equal('181000000000');
+            expect(gasPrices.fast.maxPriorityFeePerGas!.toString()).to.be.equal(
+                '165000000000'
+            );
+            expect(gasPrices.slow.maxPriorityFeePerGas!.toString()).to.be.equal(
+                '125000000000'
+            );
+        });
+    });
+
+    describe('Ensuring minimum gas prices', async () => {
+        it('EIP 1559', async () => {
+            const gasPrices = {
                 slow: {
-                    maxFeePerGas: BigNumber.from('101'),
-                    maxPriorityFeePerGas: BigNumber.from('102'),
+                    maxFeePerGas: BigNumber.from(10),
+                    maxPriorityFeePerGas: BigNumber.from(11),
                 },
                 average: {
-                    maxFeePerGas: BigNumber.from('103'),
-                    maxPriorityFeePerGas: BigNumber.from('104'),
+                    maxFeePerGas: BigNumber.from(20),
+                    maxPriorityFeePerGas: BigNumber.from(21),
                 },
                 fast: {
-                    maxFeePerGas: BigNumber.from('105'),
-                    maxPriorityFeePerGas: BigNumber.from('106'),
+                    maxFeePerGas: BigNumber.from(30),
+                    maxPriorityFeePerGas: BigNumber.from(31),
                 },
-            })
-        );
+            } as GasPriceLevels;
 
-        (gasPricesController as any).expiration = 1616620739553;
+            const newGasPrices = (gasPricesController as any)[
+                '_ensureLowerPrices'
+            ](5, false, gasPrices);
 
-        await gasPricesController.updateGasPrices(5);
-
-        const { gasPrices } =
-            gasPricesController.store.getState().gasPriceData[5];
-
-        expect(gasPrices.slow.maxFeePerGas!.toString()).to.be.equal('101');
-        expect(gasPrices.slow.maxPriorityFeePerGas!.toString()).to.be.equal(
-            '102'
-        );
-        expect(gasPrices.average.maxFeePerGas!.toString()).to.be.equal('103');
-        expect(gasPrices.average.maxPriorityFeePerGas!.toString()).to.be.equal(
-            '104'
-        );
-        expect(gasPrices.fast.maxFeePerGas!.toString()).to.be.equal('105');
-        expect(gasPrices.fast.maxPriorityFeePerGas!.toString()).to.be.equal(
-            '106'
-        );
-    });
-
-    it('Should update the legacy gas prices due to price variation policy', async () => {
-        gasPricesController.store.setState({
-            gasPriceData: {
-                5: {
-                    gasPrices: {
-                        average: { gasPrice: BigNumber.from('181000000000') },
-                        fast: { gasPrice: BigNumber.from('165000000000') },
-                        slow: { gasPrice: BigNumber.from('125000000000') },
-                    },
-                    isEIP1559Compatible: false,
-                },
-            },
+            expect(newGasPrices).not.equal(undefined);
+            expect(gasPrices).deep.equal(newGasPrices);
         });
 
-        // Check for average change
-        gasPricesController.getGasPriceLevels = () =>
-            Promise.resolve({
-                average: { gasPrice: BigNumber.from('201000000000') },
-                fast: { gasPrice: BigNumber.from('165000000000') },
-                slow: { gasPrice: BigNumber.from('125000000000') },
-            });
+        it('Non gas lower cap', async () => {
+            sinon.stub(networkController, 'getNetworkFromChainId').returns({
+                chainId: 5,
+            } as Network);
 
-        await (gasPricesController as any).updateGasPrices();
-        let { gasPrices } =
-            gasPricesController.store.getState().gasPriceData[5];
-
-        expect(gasPrices.average.gasPrice!.toString()).to.be.equal(
-            '201000000000'
-        );
-        expect(gasPrices.fast.gasPrice!.toString()).to.be.equal('165000000000');
-        expect(gasPrices.slow.gasPrice!.toString()).to.be.equal('125000000000');
-
-        // Check for fast change
-        (gasPricesController as any).getGasPriceLevels = () =>
-            Promise.resolve({
-                average: { gasPrice: BigNumber.from('201000000000') },
-                fast: { gasPrice: BigNumber.from('185000000000') },
-                slow: { gasPrice: BigNumber.from('125000000000') },
-            });
-
-        await (gasPricesController as any).updateGasPrices();
-        gasPrices =
-            gasPricesController.store.getState().gasPriceData[5].gasPrices;
-
-        expect(gasPrices.average.gasPrice!.toString()).to.be.equal(
-            '201000000000'
-        );
-        expect(gasPrices.fast.gasPrice!.toString()).to.be.equal('185000000000');
-        expect(gasPrices.slow.gasPrice!.toString()).to.be.equal('125000000000');
-
-        // Check for slow change
-        (gasPricesController as any).getGasPriceLevels = () =>
-            Promise.resolve({
-                average: { gasPrice: BigNumber.from('201000000000') },
-                fast: { gasPrice: BigNumber.from('185000000000') },
-                slow: { gasPrice: BigNumber.from('145000000000') },
-            });
-
-        await (gasPricesController as any).updateGasPrices();
-        gasPrices =
-            gasPricesController.store.getState().gasPriceData[5].gasPrices;
-
-        expect(gasPrices.average.gasPrice!.toString()).to.be.equal(
-            '201000000000'
-        );
-        expect(gasPrices.fast.gasPrice!.toString()).to.be.equal('185000000000');
-        expect(gasPrices.slow.gasPrice!.toString()).to.be.equal('145000000000');
-    });
-
-    it('Should not update the legacy gas prices due to policy', async () => {
-        gasPricesController.store.setState({
-            gasPriceData: {
-                5: {
-                    gasPrices: {
-                        average: { gasPrice: BigNumber.from('181000000000') },
-                        fast: { gasPrice: BigNumber.from('165000000000') },
-                        slow: { gasPrice: BigNumber.from('125000000000') },
-                    },
-                    isEIP1559Compatible: false,
+            const gasPrices = {
+                slow: {
+                    gasPrice: BigNumber.from(10),
                 },
-            },
+                average: {
+                    gasPrice: BigNumber.from(15),
+                },
+                fast: {
+                    gasPrice: BigNumber.from(20),
+                },
+            } as GasPriceLevels;
+
+            const newGasPrices = (gasPricesController as any)[
+                '_ensureLowerPrices'
+            ](5, false, gasPrices);
+
+            expect(newGasPrices).not.equal(undefined);
+            expect(gasPrices).deep.equal(newGasPrices);
         });
 
-        // Check for average change < 5%
-        (gasPricesController as any).getGasPriceLevels = () =>
-            Promise.resolve({
-                average: { gasPrice: BigNumber.from('181000000001') },
-                fast: { gasPrice: BigNumber.from('165000000000') },
-                slow: { gasPrice: BigNumber.from('125000000000') },
-            });
-
-        await (gasPricesController as any).updateGasPrices();
-        let { gasPrices } =
-            gasPricesController.store.getState().gasPriceData[5];
-
-        expect(gasPrices.average.gasPrice!.toString()).to.be.equal(
-            '181000000000'
-        );
-        expect(gasPrices.fast.gasPrice!.toString()).to.be.equal('165000000000');
-        expect(gasPrices.slow.gasPrice!.toString()).to.be.equal('125000000000');
-
-        // Check for fast change
-        (gasPricesController as any).getGasPriceLevels = () =>
-            Promise.resolve({
-                average: { gasPrice: BigNumber.from('181000000000') },
-                fast: { gasPrice: BigNumber.from('165000000001') },
-                slow: { gasPrice: BigNumber.from('125000000000') },
-            });
-
-        await (gasPricesController as any).updateGasPrices();
-        gasPrices =
-            gasPricesController.store.getState().gasPriceData[5].gasPrices;
-
-        expect(gasPrices.average.gasPrice!.toString()).to.be.equal(
-            '181000000000'
-        );
-        expect(gasPrices.fast.gasPrice!.toString()).to.be.equal('165000000000');
-        expect(gasPrices.slow.gasPrice!.toString()).to.be.equal('125000000000');
-
-        // Check for slow change
-        (gasPricesController as any).getGasPriceLevels = () =>
-            Promise.resolve({
-                average: { gasPrice: BigNumber.from('181000000000') },
-                fast: { gasPrice: BigNumber.from('165000000000') },
-                slow: { gasPrice: BigNumber.from('125000000001') },
-            });
-
-        await (gasPricesController as any).updateGasPrices();
-        gasPrices =
-            gasPricesController.store.getState().gasPriceData[5].gasPrices;
-
-        expect(gasPrices.average.gasPrice!.toString()).to.be.equal(
-            '181000000000'
-        );
-        expect(gasPrices.fast.gasPrice!.toString()).to.be.equal('165000000000');
-        expect(gasPrices.slow.gasPrice!.toString()).to.be.equal('125000000000');
-    });
-
-    it('Should update the EIP1559 gas prices due to price variation policy', async () => {
-        gasPricesController.store.setState({
-            gasPriceData: {
-                5: {
-                    gasPrices: {
-                        average: {
-                            maxPriorityFeePerGas:
-                                BigNumber.from('181000000000'),
-                        },
-                        fast: {
-                            maxPriorityFeePerGas:
-                                BigNumber.from('165000000000'),
-                        },
-                        slow: {
-                            maxPriorityFeePerGas:
-                                BigNumber.from('125000000000'),
-                        },
-                    },
-                    isEIP1559Compatible: true,
+        it('Lower cap too low', async () => {
+            sinon.stub(networkController, 'getNetworkFromChainId').returns({
+                gasLowerCap: {
+                    gasPrice: BigNumber.from(1),
                 },
-            },
+            } as Network);
+
+            const gasPrices = {
+                slow: {
+                    gasPrice: BigNumber.from(10),
+                },
+                average: {
+                    gasPrice: BigNumber.from(15),
+                },
+                fast: {
+                    gasPrice: BigNumber.from(20),
+                },
+            } as GasPriceLevels;
+
+            const newGasPrices = (gasPricesController as any)[
+                '_ensureLowerPrices'
+            ](5, false, gasPrices);
+
+            expect(newGasPrices).not.equal(undefined);
+            expect(gasPrices).deep.equal(newGasPrices);
         });
 
-        // Check for average change
-        (gasPricesController as any).getEIP1599GasPriceLevels = () =>
-            Promise.resolve({
+        it('Lower cap too low but duplicated values', async () => {
+            sinon.stub(networkController, 'getNetworkFromChainId').returns({
+                gasLowerCap: {
+                    gasPrice: BigNumber.from(1),
+                },
+            } as Network);
+
+            const gasPrices = {
+                slow: {
+                    gasPrice: BigNumber.from(100),
+                },
                 average: {
-                    maxPriorityFeePerGas: BigNumber.from('201000000000'),
+                    gasPrice: BigNumber.from(100),
                 },
-                fast: { maxPriorityFeePerGas: BigNumber.from('165000000000') },
-                slow: { maxPriorityFeePerGas: BigNumber.from('125000000000') },
-            });
+                fast: {
+                    gasPrice: BigNumber.from(100),
+                },
+            } as GasPriceLevels;
 
-        await (gasPricesController as any).updateGasPrices();
+            const newGasPrices = (gasPricesController as any)[
+                '_ensureLowerPrices'
+            ](5, false, gasPrices);
 
-        let gos =
-            gasPricesController.store.getState().gasPriceData[5].gasPrices;
-
-        let { gasPrices } =
-            gasPricesController.store.getState().gasPriceData[5];
-
-        expect(gasPrices.average.maxPriorityFeePerGas!.toString()).to.be.equal(
-            '201000000000'
-        );
-        expect(gasPrices.fast.maxPriorityFeePerGas!.toString()).to.be.equal(
-            '165000000000'
-        );
-        expect(gasPrices.slow.maxPriorityFeePerGas!.toString()).to.be.equal(
-            '125000000000'
-        );
-
-        // Check for fast change
-        (gasPricesController as any).getEIP1599GasPriceLevels = () =>
-            Promise.resolve({
+            expect(newGasPrices).not.equal(undefined);
+            expect(gasPrices).deep.equal({
+                slow: {
+                    gasPrice: BigNumber.from(100),
+                },
                 average: {
-                    maxPriorityFeePerGas: BigNumber.from('201000000000'),
+                    gasPrice: BigNumber.from(125),
                 },
-                fast: { maxPriorityFeePerGas: BigNumber.from('185000000000') },
-                slow: { maxPriorityFeePerGas: BigNumber.from('125000000000') },
-            });
-
-        await (gasPricesController as any).updateGasPrices();
-        gasPrices =
-            gasPricesController.store.getState().gasPriceData[5].gasPrices;
-
-        expect(gasPrices.average.maxPriorityFeePerGas!.toString()).to.be.equal(
-            '201000000000'
-        );
-        expect(gasPrices.fast.maxPriorityFeePerGas!.toString()).to.be.equal(
-            '185000000000'
-        );
-        expect(gasPrices.slow.maxPriorityFeePerGas!.toString()).to.be.equal(
-            '125000000000'
-        );
-
-        // Check for slow change
-        (gasPricesController as any).getEIP1599GasPriceLevels = () =>
-            Promise.resolve({
-                average: {
-                    maxPriorityFeePerGas: BigNumber.from('201000000000'),
+                fast: {
+                    gasPrice: BigNumber.from(125).mul(125).div(100),
                 },
-                fast: { maxPriorityFeePerGas: BigNumber.from('185000000000') },
-                slow: { maxPriorityFeePerGas: BigNumber.from('145000000000') },
-            });
-
-        await (gasPricesController as any).updateGasPrices();
-
-        gasPrices =
-            gasPricesController.store.getState().gasPriceData[5].gasPrices;
-
-        expect(gasPrices.average.maxPriorityFeePerGas!.toString()).to.be.equal(
-            '201000000000'
-        );
-        expect(gasPrices.fast.maxPriorityFeePerGas!.toString()).to.be.equal(
-            '185000000000'
-        );
-        expect(gasPrices.slow.maxPriorityFeePerGas!.toString()).to.be.equal(
-            '145000000000'
-        );
-    }).timeout(10000);
-
-    it('Should not update the EIP1559 gas prices due to policy', async () => {
-        gasPricesController.store.setState({
-            gasPriceData: {
-                5: {
-                    gasPrices: {
-                        average: {
-                            maxPriorityFeePerGas:
-                                BigNumber.from('181000000000'),
-                        },
-                        fast: {
-                            maxPriorityFeePerGas:
-                                BigNumber.from('165000000000'),
-                        },
-                        slow: {
-                            maxPriorityFeePerGas:
-                                BigNumber.from('125000000000'),
-                        },
-                    },
-                    isEIP1559Compatible: true,
-                },
-            },
+            } as GasPriceLevels);
         });
 
-        // Check for average change < 5%
-        (gasPricesController as any).getEIP1599GasPriceLevels = () =>
-            Promise.resolve({
-                average: {
-                    maxPriorityFeePerGas: BigNumber.from('181000000001'),
+        it('Lower cap too low but bad ordered values', async () => {
+            sinon.stub(networkController, 'getNetworkFromChainId').returns({
+                gasLowerCap: {
+                    gasPrice: BigNumber.from(1),
                 },
-                fast: { maxPriorityFeePerGas: BigNumber.from('165000000000') },
-                slow: { maxPriorityFeePerGas: BigNumber.from('125000000000') },
-            });
+            } as Network);
 
-        await (gasPricesController as any).updateGasPrices();
-        let { gasPrices } =
-            gasPricesController.store.getState().gasPriceData[5];
-
-        expect(gasPrices.average.maxPriorityFeePerGas!.toString()).to.be.equal(
-            '181000000000'
-        );
-        expect(gasPrices.fast.maxPriorityFeePerGas!.toString()).to.be.equal(
-            '165000000000'
-        );
-        expect(gasPrices.slow.maxPriorityFeePerGas!.toString()).to.be.equal(
-            '125000000000'
-        );
-
-        // Check for fast change
-        (gasPricesController as any).getEIP1599GasPriceLevels = () =>
-            Promise.resolve({
-                average: {
-                    maxPriorityFeePerGas: BigNumber.from('181000000000'),
+            const gasPrices = {
+                slow: {
+                    gasPrice: BigNumber.from(100),
                 },
-                fast: { maxPriorityFeePerGas: BigNumber.from('165000000001') },
-                slow: { maxPriorityFeePerGas: BigNumber.from('125000000000') },
-            });
-
-        await (gasPricesController as any).updateGasPrices();
-        gasPrices =
-            gasPricesController.store.getState().gasPriceData[5].gasPrices;
-
-        expect(gasPrices.average.maxPriorityFeePerGas!.toString()).to.be.equal(
-            '181000000000'
-        );
-        expect(gasPrices.fast.maxPriorityFeePerGas!.toString()).to.be.equal(
-            '165000000000'
-        );
-        expect(gasPrices.slow.maxPriorityFeePerGas!.toString()).to.be.equal(
-            '125000000000'
-        );
-
-        // Check for slow change
-        (gasPricesController as any).getEIP1599GasPriceLevels = () =>
-            Promise.resolve({
                 average: {
-                    maxPriorityFeePerGas: BigNumber.from('181000000000'),
+                    gasPrice: BigNumber.from(190),
                 },
-                fast: { maxPriorityFeePerGas: BigNumber.from('165000000000') },
-                slow: { maxPriorityFeePerGas: BigNumber.from('125000000001') },
-            });
+                fast: {
+                    gasPrice: BigNumber.from(10),
+                },
+            } as GasPriceLevels;
 
-        await (gasPricesController as any).updateGasPrices();
-        gasPrices =
-            gasPricesController.store.getState().gasPriceData[5].gasPrices;
+            const newGasPrices = (gasPricesController as any)[
+                '_ensureLowerPrices'
+            ](5, false, gasPrices);
 
-        expect(gasPrices.average.maxPriorityFeePerGas!.toString()).to.be.equal(
-            '181000000000'
-        );
-        expect(gasPrices.fast.maxPriorityFeePerGas!.toString()).to.be.equal(
-            '165000000000'
-        );
-        expect(gasPrices.slow.maxPriorityFeePerGas!.toString()).to.be.equal(
-            '125000000000'
-        );
+            expect(newGasPrices).not.equal(undefined);
+            expect(gasPrices).deep.equal({
+                slow: {
+                    gasPrice: BigNumber.from(100),
+                },
+                average: {
+                    gasPrice: BigNumber.from(190),
+                },
+                fast: {
+                    gasPrice: BigNumber.from(190).mul(125).div(100),
+                },
+            } as GasPriceLevels);
+        });
+
+        it('Should ensure the lower gas price', async () => {
+            sinon.stub(networkController, 'getNetworkFromChainId').returns({
+                gasLowerCap: {
+                    gasPrice: BigNumber.from(12),
+                },
+            } as Network);
+
+            const gasPrices = {
+                slow: {
+                    gasPrice: BigNumber.from(10),
+                },
+                average: {
+                    gasPrice: BigNumber.from(15),
+                },
+                fast: {
+                    gasPrice: BigNumber.from(20),
+                },
+            } as GasPriceLevels;
+
+            const newGasPrices = (gasPricesController as any)[
+                '_ensureLowerPrices'
+            ](5, false, gasPrices);
+
+            expect(newGasPrices).not.equal(undefined);
+            expect(gasPrices).deep.equal({
+                slow: {
+                    gasPrice: BigNumber.from(12),
+                },
+                average: {
+                    gasPrice: BigNumber.from(15),
+                },
+                fast: {
+                    gasPrice: BigNumber.from(20),
+                },
+            } as GasPriceLevels);
+        });
+
+        it('Should ensure the lower gas price 2', async () => {
+            sinon.stub(networkController, 'getNetworkFromChainId').returns({
+                gasLowerCap: {
+                    gasPrice: BigNumber.from(21),
+                },
+            } as Network);
+
+            const gasPrices = {
+                slow: {
+                    gasPrice: BigNumber.from(10),
+                },
+                average: {
+                    gasPrice: BigNumber.from(15),
+                },
+                fast: {
+                    gasPrice: BigNumber.from(20),
+                },
+            } as GasPriceLevels;
+
+            const newGasPrices = (gasPricesController as any)[
+                '_ensureLowerPrices'
+            ](5, false, gasPrices);
+
+            expect(newGasPrices).not.equal(undefined);
+            expect(gasPrices).deep.equal({
+                slow: {
+                    gasPrice: BigNumber.from(21),
+                },
+                average: {
+                    gasPrice: BigNumber.from(21).mul(125).div(100),
+                },
+                fast: {
+                    gasPrice: BigNumber.from(21)
+                        .mul(125)
+                        .div(100)
+                        .mul(125)
+                        .div(100),
+                },
+            } as GasPriceLevels);
+        });
+
+        it('Should ensure the lower gas price 3', async () => {
+            sinon.stub(networkController, 'getNetworkFromChainId').returns({
+                gasLowerCap: {
+                    gasPrice: BigNumber.from(14),
+                },
+            } as Network);
+
+            const gasPrices = {
+                slow: {
+                    gasPrice: BigNumber.from(10),
+                },
+                average: {
+                    gasPrice: BigNumber.from(12),
+                },
+                fast: {
+                    gasPrice: BigNumber.from(50),
+                },
+            } as GasPriceLevels;
+
+            const newGasPrices = (gasPricesController as any)[
+                '_ensureLowerPrices'
+            ](5, false, gasPrices);
+
+            expect(newGasPrices).not.equal(undefined);
+            expect(gasPrices).deep.equal({
+                slow: {
+                    gasPrice: BigNumber.from(14),
+                },
+                average: {
+                    gasPrice: BigNumber.from(14).mul(125).div(100),
+                },
+                fast: {
+                    gasPrice: BigNumber.from(50),
+                },
+            } as GasPriceLevels);
+        });
+
+        it('Should ensure the lower gas price 4', async () => {
+            sinon.stub(networkController, 'getNetworkFromChainId').returns({
+                gasLowerCap: {
+                    gasPrice: BigNumber.from(31),
+                },
+            } as Network);
+
+            const gasPrices = {
+                slow: {
+                    gasPrice: BigNumber.from(30),
+                },
+                average: {
+                    gasPrice: BigNumber.from(600),
+                },
+                fast: {
+                    gasPrice: BigNumber.from(601),
+                },
+            } as GasPriceLevels;
+
+            const newGasPrices = (gasPricesController as any)[
+                '_ensureLowerPrices'
+            ](5, false, gasPrices);
+
+            expect(newGasPrices).not.equal(undefined);
+            expect(gasPrices).deep.equal({
+                slow: {
+                    gasPrice: BigNumber.from(31),
+                },
+                average: {
+                    gasPrice: BigNumber.from(600),
+                },
+                fast: {
+                    gasPrice: BigNumber.from(601),
+                },
+            } as GasPriceLevels);
+        });
+
+        it('Should ensure the lower gas price & prevent duplicate prices', async () => {
+            sinon.stub(networkController, 'getNetworkFromChainId').returns({
+                gasLowerCap: {
+                    gasPrice: BigNumber.from(100),
+                },
+            } as Network);
+
+            const gasPrices = {
+                slow: {
+                    gasPrice: BigNumber.from(10),
+                },
+                average: {
+                    gasPrice: BigNumber.from(15),
+                },
+                fast: {
+                    gasPrice: BigNumber.from(20),
+                },
+            } as GasPriceLevels;
+
+            const newGasPrices = (gasPricesController as any)[
+                '_ensureLowerPrices'
+            ](5, false, gasPrices);
+
+            expect(newGasPrices).not.equal(undefined);
+            expect(gasPrices).deep.equal({
+                slow: {
+                    gasPrice: BigNumber.from(100),
+                },
+                average: {
+                    gasPrice: BigNumber.from(125),
+                },
+                fast: {
+                    gasPrice: BigNumber.from(125).mul(125).div(100),
+                },
+            } as GasPriceLevels);
+        });
     });
 
-    it('Should detect EIP1559 compatibility properly', async function () {
-        await gasPricesController.updateEIP1559Compatibility();
-        expect(
-            gasPricesController.store.getState().gasPriceData[5]
-                .isEIP1559Compatible
-        ).to.be.true;
-    }).timeout(100000);
+    describe('Fetching fee data', async () => {
+        it('No EIP1559 network, supported by the service', async () => {
+            sinon
+                .stub(gasPricesController as any, '_shouldRequestChainService')
+                .returns(true);
 
-    it('Should transform legacy gas price to EIP1559 format', async () => {
-        await networkController.setNetwork('goerli');
-        await gasPricesController.updateEIP1559Compatibility();
+            sinon.stub(axios, 'get').returns(
+                new Promise((resolve) => {
+                    resolve({
+                        data: {
+                            blockNumber: '22332861',
+                            blockGasLimit: '1234567',
+                            gasPricesLevels: {
+                                slow: {
+                                    gasPrice: '25500000000',
+                                },
+                                average: {
+                                    gasPrice: '30000000000',
+                                },
+                                fast: {
+                                    gasPrice: '37500000000',
+                                },
+                            },
+                        },
+                        status: 200,
+                        statusText: '200',
+                        headers: {},
+                        config: {},
+                        request: {},
+                    });
+                })
+            );
 
-        const transactionMeta: TransactionMeta = {
-            id: '1',
-            status: TransactionStatus.UNAPPROVED,
-            time: new Date().getTime(),
-            loadingGasValues: false,
-            transactionParams: {
-                gasPrice: BigNumber.from(100),
-            },
-            blocksDropCount: 0,
-        };
+            const gasPricesLevels: GasPriceLevels = await (
+                gasPricesController as any
+            )._fetchFeeData(false, {}, 1, 5);
 
-        await gasPricesController.transformLegacyGasPriceToEIP1559FeeData(
-            transactionMeta
-        );
+            expect(gasPricesLevels).not.equal(undefined);
+            expect(gasPricesLevels).deep.equal({
+                slow: {
+                    gasPrice: BigNumber.from('25500000000'),
+                    maxFeePerGas: null,
+                    maxPriorityFeePerGas: null,
+                },
+                average: {
+                    gasPrice: BigNumber.from('30000000000'),
+                    maxFeePerGas: null,
+                    maxPriorityFeePerGas: null,
+                },
+                fast: {
+                    gasPrice: BigNumber.from('37500000000'),
+                    maxFeePerGas: null,
+                    maxPriorityFeePerGas: null,
+                },
+            } as GasPriceLevels);
 
-        expect(transactionMeta).to.be.not.null;
-        expect(transactionMeta).to.be.not.undefined;
-        expect(transactionMeta.transactionParams).to.be.not.undefined;
+            const state = gasPricesController.store.getState();
 
-        expect(transactionMeta.transactionParams.maxPriorityFeePerGas).to.be.not
-            .undefined;
-        expect(transactionMeta.transactionParams.maxFeePerGas).to.be.not
-            .undefined;
-        expect(transactionMeta.transactionParams.gasPrice).to.be.undefined;
+            expect(state).not.equal(undefined);
+            expect(state.gasPriceData).not.equal(undefined);
+            expect(5 in state.gasPriceData).equal(true);
+            expect(state.gasPriceData[5]).deep.equal({
+                chainSupportedByFeeService: {
+                    lastBlockChecked: 1,
+                    supported: true,
+                },
+                blockGasLimit: BigNumber.from('1234567'),
+                baseFee: undefined,
+                estimatedBaseFee: undefined,
+            } as GasPriceData);
+        });
+        it('EIP1559 network, supported by the service', async () => {
+            sinon
+                .stub(gasPricesController as any, '_shouldRequestChainService')
+                .returns(true);
 
-        expect(
-            transactionMeta.transactionParams.maxPriorityFeePerGas?.eq(
-                BigNumber.from(100)
-            )
-        ).equal(true);
-        expect(
-            transactionMeta.transactionParams.maxFeePerGas?.eq(
-                BigNumber.from(100)
-            )
-        ).equal(true);
+            sinon.stub(axios, 'get').returns(
+                new Promise((resolve) => {
+                    resolve({
+                        data: {
+                            blockNumber: '13775611',
+                            blockGasLimit: '1234567',
+                            baseFee: '51022938614',
+                            estimatedBaseFee: '51022949725',
+                            gasPricesLevels: {
+                                slow: {
+                                    maxFeePerGas: '45920644752',
+                                    maxPriorityFeePerGas: '500000000',
+                                },
+                                average: {
+                                    maxFeePerGas: '57125232475',
+                                    maxPriorityFeePerGas: '1000000000',
+                                },
+                                fast: {
+                                    maxFeePerGas: '67829820198',
+                                    maxPriorityFeePerGas: '1500000000',
+                                },
+                            },
+                        },
+                        status: 200,
+                        statusText: '200',
+                        headers: {},
+                        config: {},
+                        request: {},
+                    });
+                })
+            );
+
+            const gasPricesLevels: GasPriceLevels = await (
+                gasPricesController as any
+            )._fetchFeeData(true, {}, 1, 5);
+
+            expect(gasPricesLevels).not.equal(undefined);
+            expect(gasPricesLevels).deep.equal({
+                slow: {
+                    gasPrice: null,
+                    maxFeePerGas: BigNumber.from('45920644752'),
+                    maxPriorityFeePerGas: BigNumber.from('500000000'),
+                },
+                average: {
+                    gasPrice: null,
+                    maxFeePerGas: BigNumber.from('57125232475'),
+                    maxPriorityFeePerGas: BigNumber.from('1000000000'),
+                },
+                fast: {
+                    gasPrice: null,
+                    maxFeePerGas: BigNumber.from('67829820198'),
+                    maxPriorityFeePerGas: BigNumber.from('1500000000'),
+                },
+            } as GasPriceLevels);
+
+            const state = gasPricesController.store.getState();
+
+            expect(state).not.equal(undefined);
+            expect(state.gasPriceData).not.equal(undefined);
+            expect(5 in state.gasPriceData).equal(true);
+            expect(state.gasPriceData[5]).deep.equal({
+                chainSupportedByFeeService: {
+                    lastBlockChecked: 1,
+                    supported: true,
+                },
+                blockGasLimit: BigNumber.from('1234567'),
+                baseFee: BigNumber.from('51022938614'),
+                estimatedBaseFee: BigNumber.from('51022949725'),
+            } as GasPriceData);
+        });
+        it('No EIP1559 network, no supported by the service, fetching the chain', async () => {
+            sinon
+                .stub(gasPricesController as any, '_shouldRequestChainService')
+                .returns(true);
+
+            sinon.stub(axios, 'get').returns(
+                new Promise((resolve) => {
+                    resolve({
+                        data: {},
+                        status: 400,
+                        statusText: '400',
+                        headers: {},
+                        config: {},
+                        request: {},
+                    });
+                })
+            );
+
+            const providerStub = sinon.stub(
+                networkController.getProvider(),
+                'getGasPrice'
+            );
+            providerStub.returns(
+                new Promise<BigNumber>((resolve) =>
+                    resolve(BigNumber.from('30000000000'))
+                )
+            );
+            sinon.stub(networkController, 'getLatestBlock').returns(
+                new Promise<Block>((resolve) => {
+                    resolve({
+                        gasLimit: BigNumber.from('1234567'),
+                    } as Block);
+                })
+            );
+
+            const gasPricesLevels: GasPriceLevels = await (
+                gasPricesController as any
+            )._fetchFeeData(false, {}, 1, 5);
+
+            expect(gasPricesLevels).not.equal(undefined);
+            expect(gasPricesLevels).deep.equal({
+                slow: {
+                    gasPrice: BigNumber.from('25500000000'),
+                    maxFeePerGas: null,
+                    maxPriorityFeePerGas: null,
+                },
+                average: {
+                    gasPrice: BigNumber.from('30000000000'),
+                    maxFeePerGas: null,
+                    maxPriorityFeePerGas: null,
+                },
+                fast: {
+                    gasPrice: BigNumber.from('37500000000'),
+                    maxFeePerGas: null,
+                    maxPriorityFeePerGas: null,
+                },
+            } as GasPriceLevels);
+
+            const state = gasPricesController.store.getState();
+
+            expect(state).not.equal(undefined);
+            expect(state.gasPriceData).not.equal(undefined);
+            expect(5 in state.gasPriceData).equal(true);
+            expect(state.gasPriceData[5]).deep.equal({
+                chainSupportedByFeeService: {
+                    lastBlockChecked: 1,
+                    supported: false,
+                },
+                blockGasLimit: BigNumber.from('1234567'),
+                baseFee: undefined,
+                estimatedBaseFee: undefined,
+            } as GasPriceData);
+        });
+        it('EIP1559 network, no supported by the service, fetching the chain', async () => {
+            sinon
+                .stub(gasPricesController as any, '_shouldRequestChainService')
+                .returns(true);
+
+            sinon.stub(axios, 'get').returns(
+                new Promise((resolve) => {
+                    resolve({
+                        data: {},
+                        status: 400,
+                        statusText: '400',
+                        headers: {},
+                        config: {},
+                        request: {},
+                    });
+                })
+            );
+
+            sinon.stub(networkController, 'getLatestBlock').returns(
+                new Promise<Block>((resolve) => {
+                    resolve({
+                        baseFeePerGas: BigNumber.from('100000'),
+                        gasLimit: BigNumber.from('1234567'),
+                    } as Block);
+                })
+            );
+
+            const providerStub = sinon.stub(
+                networkController.getProvider(),
+                'send'
+            );
+            providerStub.onFirstCall().returns(
+                new Promise<any>((resolve) => {
+                    resolve({
+                        baseFeePerGas: [BigNumber.from('110000')],
+                        reward: [
+                            [
+                                BigNumber.from('20000'),
+                                BigNumber.from('23000'),
+                                BigNumber.from('26000'),
+                            ],
+                        ],
+                    });
+                })
+            );
+
+            const gasPricesLevels: GasPriceLevels = await (
+                gasPricesController as any
+            )._fetchFeeData(true, {}, 1, 5);
+
+            expect(gasPricesLevels).not.equal(undefined);
+            expect(gasPricesLevels).deep.equal({
+                slow: {
+                    gasPrice: null,
+                    maxFeePerGas: BigNumber.from('119000'),
+                    maxPriorityFeePerGas: BigNumber.from('20000'),
+                },
+                average: {
+                    gasPrice: null,
+                    maxFeePerGas: BigNumber.from('144000'),
+                    maxPriorityFeePerGas: BigNumber.from('23000'),
+                },
+                fast: {
+                    gasPrice: null,
+                    maxFeePerGas: BigNumber.from('169000'),
+                    maxPriorityFeePerGas: BigNumber.from('26000'),
+                },
+            } as GasPriceLevels);
+
+            const state = gasPricesController.store.getState();
+
+            expect(state).not.equal(undefined);
+            expect(state.gasPriceData).not.equal(undefined);
+            expect(5 in state.gasPriceData).equal(true);
+            expect(state.gasPriceData[5]).deep.equal({
+                chainSupportedByFeeService: {
+                    lastBlockChecked: 1,
+                    supported: false,
+                },
+                blockGasLimit: BigNumber.from('1234567'),
+                baseFee: BigNumber.from('100000'),
+                estimatedBaseFee: BigNumber.from('110000'),
+            } as GasPriceData);
+        });
+        it('No EIP1559 network. no supported by the service (cached), fetching the chain', async () => {
+            sinon
+                .stub(gasPricesController as any, '_shouldRequestChainService')
+                .returns(false);
+
+            const providerStub = sinon.stub(
+                networkController.getProvider(),
+                'getGasPrice'
+            );
+            providerStub.returns(
+                new Promise<BigNumber>((resolve) =>
+                    resolve(BigNumber.from('30000000000'))
+                )
+            );
+            sinon.stub(networkController, 'getLatestBlock').returns(
+                new Promise<Block>((resolve) => {
+                    resolve({
+                        gasLimit: BigNumber.from('1234567'),
+                    } as Block);
+                })
+            );
+
+            const gasPricesLevels: GasPriceLevels = await (
+                gasPricesController as any
+            )._fetchFeeData(false, {}, 1, 5);
+
+            expect(gasPricesLevels).not.equal(undefined);
+            expect(gasPricesLevels).deep.equal({
+                slow: {
+                    gasPrice: BigNumber.from('25500000000'),
+                    maxFeePerGas: null,
+                    maxPriorityFeePerGas: null,
+                },
+                average: {
+                    gasPrice: BigNumber.from('30000000000'),
+                    maxFeePerGas: null,
+                    maxPriorityFeePerGas: null,
+                },
+                fast: {
+                    gasPrice: BigNumber.from('37500000000'),
+                    maxFeePerGas: null,
+                    maxPriorityFeePerGas: null,
+                },
+            } as GasPriceLevels);
+
+            const state = gasPricesController.store.getState();
+
+            expect(state).not.equal(undefined);
+            expect(state.gasPriceData).not.equal(undefined);
+            expect(5 in state.gasPriceData).equal(true);
+            expect(state.gasPriceData[5]).deep.equal({
+                chainSupportedByFeeService: {
+                    lastBlockChecked: 1,
+                    supported: false,
+                },
+                blockGasLimit: BigNumber.from('1234567'),
+                baseFee: undefined,
+                estimatedBaseFee: undefined,
+            } as GasPriceData);
+        });
+        it('EIP1559 network, no supported by the service (cached), fetching the chain', async () => {
+            sinon
+                .stub(gasPricesController as any, '_shouldRequestChainService')
+                .returns(false);
+
+            sinon.stub(axios, 'get').returns(
+                new Promise((resolve) => {
+                    resolve({
+                        data: {},
+                        status: 400,
+                        statusText: '400',
+                        headers: {},
+                        config: {},
+                        request: {},
+                    });
+                })
+            );
+
+            sinon.stub(networkController, 'getLatestBlock').returns(
+                new Promise<Block>((resolve) => {
+                    resolve({
+                        baseFeePerGas: BigNumber.from('100000'),
+                        gasLimit: BigNumber.from('1234567'),
+                    } as Block);
+                })
+            );
+
+            const providerStub = sinon.stub(
+                networkController.getProvider(),
+                'send'
+            );
+            providerStub.onFirstCall().returns(
+                new Promise<any>((resolve) => {
+                    resolve({
+                        baseFeePerGas: [BigNumber.from('110000')],
+                        reward: [
+                            [
+                                BigNumber.from('20000'),
+                                BigNumber.from('23000'),
+                                BigNumber.from('26000'),
+                            ],
+                        ],
+                    });
+                })
+            );
+
+            const gasPricesLevels: GasPriceLevels = await (
+                gasPricesController as any
+            )._fetchFeeData(true, {}, 1, 5);
+
+            expect(gasPricesLevels).not.equal(undefined);
+            expect(gasPricesLevels).deep.equal({
+                slow: {
+                    gasPrice: null,
+                    maxFeePerGas: BigNumber.from('119000'),
+                    maxPriorityFeePerGas: BigNumber.from('20000'),
+                },
+                average: {
+                    gasPrice: null,
+                    maxFeePerGas: BigNumber.from('144000'),
+                    maxPriorityFeePerGas: BigNumber.from('23000'),
+                },
+                fast: {
+                    gasPrice: null,
+                    maxFeePerGas: BigNumber.from('169000'),
+                    maxPriorityFeePerGas: BigNumber.from('26000'),
+                },
+            } as GasPriceLevels);
+
+            const state = gasPricesController.store.getState();
+
+            expect(state).not.equal(undefined);
+            expect(state.gasPriceData).not.equal(undefined);
+            expect(5 in state.gasPriceData).equal(true);
+            expect(state.gasPriceData[5]).deep.equal({
+                chainSupportedByFeeService: {
+                    lastBlockChecked: 1,
+                    supported: false,
+                },
+                blockGasLimit: BigNumber.from('1234567'),
+                baseFee: BigNumber.from('100000'),
+                estimatedBaseFee: BigNumber.from('110000'),
+            } as GasPriceData);
+        });
+        it('No EIP1559 network, supported by the service but the service fails, fetching the chain', async () => {
+            sinon
+                .stub(gasPricesController as any, '_shouldRequestChainService')
+                .returns(true);
+
+            sinon.stub(axios, 'get').returns(
+                new Promise((resolve) => {
+                    resolve({
+                        data: {},
+                        status: 500,
+                        statusText: '500',
+                        headers: {},
+                        config: {},
+                        request: {},
+                    });
+                })
+            );
+
+            const providerStub = sinon.stub(
+                networkController.getProvider(),
+                'getGasPrice'
+            );
+            providerStub.returns(
+                new Promise<BigNumber>((resolve) =>
+                    resolve(BigNumber.from('30000000000'))
+                )
+            );
+            sinon.stub(networkController, 'getLatestBlock').returns(
+                new Promise<Block>((resolve) => {
+                    resolve({
+                        gasLimit: BigNumber.from('1234567'),
+                    } as Block);
+                })
+            );
+
+            const gasPricesLevels: GasPriceLevels = await (
+                gasPricesController as any
+            )._fetchFeeData(false, {}, 1, 5);
+
+            expect(gasPricesLevels).not.equal(undefined);
+            expect(gasPricesLevels).deep.equal({
+                slow: {
+                    gasPrice: BigNumber.from('25500000000'),
+                    maxFeePerGas: null,
+                    maxPriorityFeePerGas: null,
+                },
+                average: {
+                    gasPrice: BigNumber.from('30000000000'),
+                    maxFeePerGas: null,
+                    maxPriorityFeePerGas: null,
+                },
+                fast: {
+                    gasPrice: BigNumber.from('37500000000'),
+                    maxFeePerGas: null,
+                    maxPriorityFeePerGas: null,
+                },
+            } as GasPriceLevels);
+
+            const state = gasPricesController.store.getState();
+
+            expect(state).not.equal(undefined);
+            expect(state.gasPriceData).not.equal(undefined);
+            expect(5 in state.gasPriceData).equal(true);
+            expect(state.gasPriceData[5]).deep.equal({
+                chainSupportedByFeeService: {
+                    lastBlockChecked: 1,
+                    supported: false,
+                },
+                blockGasLimit: BigNumber.from('1234567'),
+                baseFee: undefined,
+                estimatedBaseFee: undefined,
+            } as GasPriceData);
+        });
+        it('EIP1559 network, supported by the service but the service fails, fetching the chain', async () => {
+            sinon
+                .stub(gasPricesController as any, '_shouldRequestChainService')
+                .returns(true);
+
+            sinon.stub(axios, 'get').returns(
+                new Promise((resolve) => {
+                    resolve({
+                        data: {},
+                        status: 500,
+                        statusText: '500',
+                        headers: {},
+                        config: {},
+                        request: {},
+                    });
+                })
+            );
+
+            sinon.stub(networkController, 'getLatestBlock').returns(
+                new Promise<Block>((resolve) => {
+                    resolve({
+                        baseFeePerGas: BigNumber.from('100000'),
+                        gasLimit: BigNumber.from('1234567'),
+                    } as Block);
+                })
+            );
+
+            const providerStub = sinon.stub(
+                networkController.getProvider(),
+                'send'
+            );
+            providerStub.onFirstCall().returns(
+                new Promise<any>((resolve) => {
+                    resolve({
+                        baseFeePerGas: [BigNumber.from('110000')],
+                        reward: [
+                            [
+                                BigNumber.from('20000'),
+                                BigNumber.from('23000'),
+                                BigNumber.from('26000'),
+                            ],
+                        ],
+                    });
+                })
+            );
+
+            const gasPricesLevels: GasPriceLevels = await (
+                gasPricesController as any
+            )._fetchFeeData(true, {}, 1, 5);
+
+            expect(gasPricesLevels).not.equal(undefined);
+            expect(gasPricesLevels).deep.equal({
+                slow: {
+                    gasPrice: null,
+                    maxFeePerGas: BigNumber.from('119000'),
+                    maxPriorityFeePerGas: BigNumber.from('20000'),
+                },
+                average: {
+                    gasPrice: null,
+                    maxFeePerGas: BigNumber.from('144000'),
+                    maxPriorityFeePerGas: BigNumber.from('23000'),
+                },
+                fast: {
+                    gasPrice: null,
+                    maxFeePerGas: BigNumber.from('169000'),
+                    maxPriorityFeePerGas: BigNumber.from('26000'),
+                },
+            } as GasPriceLevels);
+
+            const state = gasPricesController.store.getState();
+
+            expect(state).not.equal(undefined);
+            expect(state.gasPriceData).not.equal(undefined);
+            expect(5 in state.gasPriceData).equal(true);
+            expect(state.gasPriceData[5]).deep.equal({
+                chainSupportedByFeeService: {
+                    lastBlockChecked: 1,
+                    supported: false,
+                },
+                blockGasLimit: BigNumber.from('1234567'),
+                baseFee: BigNumber.from('100000'),
+                estimatedBaseFee: BigNumber.from('110000'),
+            } as GasPriceData);
+        });
+        it('General error, returning default falue', async () => {
+            sinon
+                .stub(gasPricesController as any, '_shouldRequestChainService')
+                .returns(true);
+
+            sinon.stub(axios, 'get').returns(
+                new Promise((resolve) => {
+                    resolve({
+                        data: {},
+                        status: 400,
+                        statusText: '400',
+                        headers: {},
+                        config: {},
+                        request: {},
+                    });
+                })
+            );
+
+            sinon.stub(networkController, 'getLatestBlock').returns(
+                new Promise<Block>((_, reject) => {
+                    reject(Error('mocked error'));
+                })
+            );
+
+            const gasPricesLevels: GasPriceLevels = await (
+                gasPricesController as any
+            )._fetchFeeData(
+                true,
+                {
+                    slow: {
+                        gasPrice: null,
+                        maxFeePerGas: BigNumber.from('119000'),
+                        maxPriorityFeePerGas: BigNumber.from('20000'),
+                    },
+                    average: {
+                        gasPrice: null,
+                        maxFeePerGas: BigNumber.from('144000'),
+                        maxPriorityFeePerGas: BigNumber.from('23000'),
+                    },
+                    fast: {
+                        gasPrice: null,
+                        maxFeePerGas: BigNumber.from('169000'),
+                        maxPriorityFeePerGas: BigNumber.from('26000'),
+                    },
+                } as GasPriceLevels,
+                5
+            );
+
+            expect(gasPricesLevels).not.equal(undefined);
+            expect(gasPricesLevels).deep.equal({
+                slow: {
+                    gasPrice: null,
+                    maxFeePerGas: BigNumber.from('119000'),
+                    maxPriorityFeePerGas: BigNumber.from('20000'),
+                },
+                average: {
+                    gasPrice: null,
+                    maxFeePerGas: BigNumber.from('144000'),
+                    maxPriorityFeePerGas: BigNumber.from('23000'),
+                },
+                fast: {
+                    gasPrice: null,
+                    maxFeePerGas: BigNumber.from('169000'),
+                    maxPriorityFeePerGas: BigNumber.from('26000'),
+                },
+            } as GasPriceLevels);
+        });
     });
+    describe('Chaching chain fee service support', async () => {
+        it('There is not previous object, should query the service', async () => {
+            sinon.stub(gasPricesController, 'getState').returns({
+                chainSupportedByFeeService: undefined,
+            } as GasPriceData);
 
-    it('Should not transform legacy gas price to EIP1559 format - network incompatible', async () => {
-        sinon
-            .stub(NetworkController.prototype, 'getEIP1559Compatibility')
-            .returns(Promise.resolve(false));
+            expect(
+                (gasPricesController as any)._shouldRequestChainService(1, 5)
+            ).equal(true);
+        });
+        it('Chain supported, should query the service', async () => {
+            sinon.stub(gasPricesController, 'getState').returns({
+                chainSupportedByFeeService: {
+                    lastBlockChecked: 0,
+                    supported: true,
+                },
+            } as GasPriceData);
 
-        await networkController.setNetwork('goerli');
-        await gasPricesController.updateEIP1559Compatibility();
+            expect(
+                (gasPricesController as any)._shouldRequestChainService(1, 5)
+            ).equal(true);
+        });
+        it('Current block beyond the block count treshold, should query the service', async () => {
+            sinon.stub(gasPricesController, 'getState').returns({
+                chainSupportedByFeeService: {
+                    lastBlockChecked: 1,
+                    supported: true,
+                },
+            } as GasPriceData);
 
-        const transactionMeta: TransactionMeta = {
-            id: '1',
-            status: TransactionStatus.UNAPPROVED,
-            time: new Date().getTime(),
-            loadingGasValues: false,
-            transactionParams: {
-                gasPrice: BigNumber.from(100),
-            },
-            blocksDropCount: 0,
-        };
+            expect(
+                (gasPricesController as any)._shouldRequestChainService(
+                    1000000,
+                    5
+                )
+            ).equal(true);
+        });
+        it('Current block is not beyond the block count treshold, should not query the service', async () => {
+            sinon.stub(gasPricesController, 'getState').returns({
+                chainSupportedByFeeService: {
+                    lastBlockChecked: 1,
+                    supported: false,
+                },
+            } as GasPriceData);
 
-        gasPricesController.transformLegacyGasPriceToEIP1559FeeData(
-            transactionMeta
-        );
-
-        expect(transactionMeta).to.be.not.null;
-        expect(transactionMeta).to.be.not.undefined;
-        expect(transactionMeta.transactionParams).to.be.not.undefined;
-
-        expect(transactionMeta.transactionParams.maxPriorityFeePerGas).to.be
-            .undefined;
-        expect(transactionMeta.transactionParams.maxFeePerGas).to.be.undefined;
-        expect(transactionMeta.transactionParams.gasPrice).to.be.not.undefined;
-
-        expect(
-            transactionMeta.transactionParams.gasPrice?.eq(BigNumber.from(100))
-        ).equal(true);
-    });
-
-    it('Should not transform legacy gas price to EIP1559 format - transaction already EIP1559', async () => {
-        await networkController.setNetwork('goerli');
-        await gasPricesController.updateEIP1559Compatibility();
-
-        const transactionMeta: TransactionMeta = {
-            id: '1',
-            status: TransactionStatus.UNAPPROVED,
-            time: new Date().getTime(),
-            loadingGasValues: false,
-            transactionParams: {
-                maxPriorityFeePerGas: BigNumber.from(100),
-                maxFeePerGas: BigNumber.from(100),
-            },
-            blocksDropCount: 0,
-        };
-
-        gasPricesController.transformLegacyGasPriceToEIP1559FeeData(
-            transactionMeta
-        );
-
-        expect(transactionMeta).to.be.not.null;
-        expect(transactionMeta).to.be.not.undefined;
-        expect(transactionMeta.transactionParams).to.be.not.undefined;
-
-        expect(transactionMeta.transactionParams.maxPriorityFeePerGas).to.be.not
-            .undefined;
-        expect(transactionMeta.transactionParams.maxFeePerGas).to.be.not
-            .undefined;
-        expect(transactionMeta.transactionParams.gasPrice).to.be.undefined;
-
-        expect(
-            transactionMeta.transactionParams.maxPriorityFeePerGas?.eq(
-                BigNumber.from(100)
-            )
-        ).equal(true);
-        expect(
-            transactionMeta.transactionParams.maxFeePerGas?.eq(
-                BigNumber.from(100)
-            )
-        ).equal(true);
+            expect(
+                (gasPricesController as any)._shouldRequestChainService(2, 5)
+            ).equal(false);
+        });
     });
 });

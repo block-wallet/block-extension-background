@@ -7,11 +7,12 @@ import { GasPricesController } from './GasPricesController';
 import { IncomingTransactionController } from './IncomingTransactionController';
 import NetworkController, { NetworkEvents } from './NetworkController';
 import TransactionController from './transactions/TransactionController';
-import { TransactionStatus } from './transactions/utils/types';
 
 export const BLOCK_UPDATES_INTERVAL = 15000;
 export interface BlockUpdatesControllerState {
-    blockData: { [chainId: number]: number };
+    blockData: {
+        [chainId: number]: { blockNumber: number; updateCounter: number };
+    };
 }
 
 export enum BlockUpdatesEvents {
@@ -54,17 +55,10 @@ export default class BlockUpdatesController extends BaseController<BlockUpdatesC
          * On transaction store update, update whether we should keep updating the
          * transactions
          */
-        this._transactionController.UIStore.subscribe(() => {
-            const { length: pendingTransactions } =
-                this._transactionController.store
-                    .getState()
-                    .transactions.filter(
-                        ({ status }) => status === TransactionStatus.SUBMITTED
-                    );
-
-            this.shouldQueryTransactions = pendingTransactions > 0;
-            this.emit(BlockUpdatesEvents.SUBSCRIPTION_UPDATE);
-        });
+        this._transactionController.UIStore.subscribe(
+            this.updateTransactionsSubscription
+        );
+        this.updateTransactionsSubscription();
 
         /**
          * Set or remove the block listeners depending on whether the
@@ -91,10 +85,36 @@ export default class BlockUpdatesController extends BaseController<BlockUpdatesC
             this.store.setState({
                 blockData: {
                     ...blockData,
-                    [chainId]: -1,
+                    [chainId]: { blockNumber: -1, updateCounter: 0 },
+                },
+            });
+        } else {
+            this.store.setState({
+                blockData: {
+                    ...blockData,
+                    [chainId]: {
+                        ...blockData[chainId],
+                        updateCounter: 0,
+                    },
                 },
             });
         }
+    };
+
+    /**
+     * updateTransactionsSubscription
+     *
+     * Checks whether we should keep updating the transactions
+     * according to the current network transaction's verifiedOnBlockchain
+     * status flag.
+     */
+    private updateTransactionsSubscription = () => {
+        this.shouldQueryTransactions =
+            this._transactionController.UIStore.getState().transactions.some(
+                ({ verifiedOnBlockchain }) => !verifiedOnBlockchain
+            );
+
+        this.emit(BlockUpdatesEvents.SUBSCRIPTION_UPDATE);
     };
 
     /**
@@ -127,7 +147,7 @@ export default class BlockUpdatesController extends BaseController<BlockUpdatesC
         if (!(chainId in blockData)) {
             return -1;
         }
-        return blockData[chainId];
+        return blockData[chainId].blockNumber;
     }
 
     /**
@@ -145,21 +165,47 @@ export default class BlockUpdatesController extends BaseController<BlockUpdatesC
                     network: { chainId },
                 } = this._networkController.getProvider();
 
-                const { blockData } = this.store.getState();
+                let { blockData } = this.store.getState();
+                if (!(chainId in blockData)) {
+                    // preventing race condition
+                    this.initBlockNumber(chainId);
+                    blockData = this.store.getState().blockData;
+                }
                 const currentBlock =
-                    chainId in blockData ? blockData[chainId] : -1;
+                    chainId in blockData ? blockData[chainId].blockNumber : -1;
+
+                const assetsAutoDiscoveryInterval =
+                    this._networkController.network
+                        .assetsAutoDiscoveryInterval || 10;
+
+                let updateCounter = blockData[chainId].updateCounter;
+
+                const assetsAutoDiscovery =
+                    updateCounter % assetsAutoDiscoveryInterval === 0;
+                if (assetsAutoDiscovery) {
+                    updateCounter = 0;
+                }
 
                 if (blockNumber != currentBlock) {
                     this.store.setState({
                         blockData: {
                             ...blockData,
-                            [chainId]: blockNumber,
+                            [chainId]: {
+                                blockNumber,
+                                updateCounter: updateCounter + 1,
+                            },
                         },
                     });
 
                     if (this.shouldQuery) {
-                        this._accountTrackerController.updateAccounts();
-                        this._gasPricesController.updateGasPrices();
+                        this._accountTrackerController.updateAccounts({
+                            // every N updates we fetch all the chain assets
+                            assetsAutoDiscovery,
+                        });
+                        this._gasPricesController.updateGasPrices(
+                            blockNumber,
+                            chainId
+                        );
                         this._exchangeRatesController.updateExchangeRates();
                         this._incomingTransactionController.updateIncomingTransactions();
                     }

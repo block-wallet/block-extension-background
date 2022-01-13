@@ -1,6 +1,5 @@
 import { BigNumber } from '@ethersproject/bignumber';
 import { ethers } from 'ethers';
-import { FeeData } from '../../GasPricesController';
 import { TransactionGasEstimation } from '../../transactions/TransactionController';
 import {
     TransactionCategories,
@@ -16,6 +15,7 @@ import {
     PopulatedTransactionParams,
     SignedTransaction,
     SignedTransactionProps,
+    TransactionFeeData,
 } from './SignedTransaction';
 
 /**
@@ -58,7 +58,7 @@ export class ApproveTransaction extends SignedTransaction {
         tokenAddress: string,
         spender: string,
         amount: BigNumber | 'UNLIMITED',
-        feeData: FeeData,
+        feeData: TransactionFeeData,
         waitForConfirmation = true
     ): Promise<boolean> {
         const transactionMeta = await this.addAsNewTransaction(
@@ -142,7 +142,7 @@ export class ApproveTransaction extends SignedTransaction {
      */
     public async addAsNewTransaction(
         populateTransasctionParams: ApproveTransactionPopulatedTransactionParams,
-        feeData: FeeData
+        feeData: TransactionFeeData
     ): Promise<TransactionMeta> {
         const populatedTransaction = await this.populateTransaction(
             populateTransasctionParams

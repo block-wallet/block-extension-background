@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-non-null-assertion */
 import {
     focusWindow,
     getLastFocusedWindow,
@@ -8,8 +7,10 @@ import {
     updateWindow,
 } from './window';
 import { extensionInstances } from '../infrastructure/connection';
+import { Mutex } from 'async-mutex';
 import { PlatformOS } from './types/platform';
 
+// Define window size for each os
 const windowSize: { [os in PlatformOS]: { height: number; width: number } } = {
     win: { height: 639, width: 373 },
     mac: { height: 630, width: 358 },
@@ -19,55 +20,82 @@ const windowSize: { [os in PlatformOS]: { height: number; width: number } } = {
     openbsd: { height: 600, width: 357 },
 };
 
-let uiIsTriggering = false;
-let left: number;
-let top: number;
+// Define a new mutex for the open popup function
+const mutex: Mutex = new Mutex();
 
 /**
- * Opens the extension in a window
- *
+ * Util to display the extension.
+ * A new instance will be created in a window if there isn't one already open.
+ * Otherwise, it will focus the current one.
  */
 export const openPopup = async (): Promise<void> => {
-    // Check if the extension is open in a window
-    const openTab = getOpenTab();
+    const release = await mutex.acquire();
 
-    if (openTab) {
-        // Focus window
-        focusWindow(openTab.windowId);
-        // Switch to tab
-        switchToTab(openTab.tabId);
-    } else if (!uiIsTriggering) {
-        uiIsTriggering = true;
-        try {
+    try {
+        const openTab = getOpenTab();
+
+        // Check if there is an open extension tab
+        if (openTab) {
+            focusWindow(openTab.windowId);
+            switchToTab(openTab.tabId);
+        } else if (!isExtensionOpen()) {
+            // Open a new window if the extension is not open
             await openExtensionWindow();
-        } finally {
-            uiIsTriggering = false;
         }
+    } finally {
+        release();
     }
 };
 
 /**
- * Opens an extension instance in a new window
- *
+ * Checks if the extension is open
+ */
+const isExtensionOpen = (): boolean => {
+    return extensionInstances && Object.keys(extensionInstances).length !== 0;
+};
+
+/**
+ * Returns the tab id and window id of the open extension window
+ * or null if it's an onboarding tab or there isn't one.
+ */
+const getOpenTab = (): { tabId: number; windowId: number } | null => {
+    for (const instance in extensionInstances) {
+        const tab = extensionInstances[instance].port.sender?.tab;
+        const isOnboardingTab =
+            extensionInstances[instance].port.sender?.url?.includes('tab.html');
+
+        if (tab && tab.id && tab.windowId && !isOnboardingTab) {
+            return {
+                tabId: tab.id,
+                windowId: tab.windowId,
+            };
+        }
+    }
+
+    return null;
+};
+
+/**
+ * Creates a new window with the extension
  */
 const openExtensionWindow = async () => {
-    left = 0;
-    top = 0;
-
     const os = (await getPlatformInfo()).os as PlatformOS;
-
     const width = windowSize[os].width;
     const height = windowSize[os].height;
+    let left = 0;
+    let top = 0;
 
     try {
-        const lastFocused = await getLastFocusedWindow();
+        const win = await getLastFocusedWindow();
         // Position window in top right corner of lastFocused window.
-        top = lastFocused.top!;
-        left = lastFocused.left! + (lastFocused.width! - width);
+        if (win.top && win.left && win.width) {
+            top = win.top;
+            left = win.left + (win.width - width);
+        }
     } catch (error) {
-        // The following properties will likely have irrelevant values.
-        // They are requested from the background generated page that
-        // has no physical dimensions.
+        /* The following properties will likely have irrelevant values.
+         * They are requested from the background generated page that has no
+         * physical dimensions. */
         const { screenX, screenY, outerWidth } = window;
         top = Math.max(screenY, 0);
         left = Math.max(screenX + (outerWidth - width), 0);
@@ -94,26 +122,4 @@ const openExtensionWindow = async () => {
             top,
         });
     }
-};
-
-/**
- * Returns the tab id and window id of the open extension window
- * or null if it's an onboarding tab or there isn't one.
- *
- */
-const getOpenTab = (): { tabId: number; windowId: number } | null => {
-    for (const instance in extensionInstances) {
-        const tab = extensionInstances[instance].port.sender?.tab;
-        const isOnboardingTab =
-            extensionInstances[instance].port.sender?.url?.includes('tab.html');
-
-        if (tab && tab.id && tab.windowId && !isOnboardingTab) {
-            return {
-                tabId: tab.id,
-                windowId: tab.windowId,
-            };
-        }
-    }
-
-    return null;
 };

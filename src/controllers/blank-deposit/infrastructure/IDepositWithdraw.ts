@@ -2,7 +2,8 @@ import { ethers } from 'ethers';
 import { CurrencyAmountPair } from '../types';
 import { IBlankDeposit } from '../BlankDeposit';
 import { TransactionMeta } from '../../transactions/utils/types';
-import { FeeData } from '../../GasPricesController';
+import { TransactionFeeData } from '../../erc-20/transactions/SignedTransaction';
+import { NextDepositResult } from '../notes/INotesService';
 
 export interface IDeposit {
     /**
@@ -10,8 +11,12 @@ export interface IDeposit {
      * @param currencyAmountPair
      */
     populateDepositTransaction(
-        currencyAmountPair: CurrencyAmountPair
-    ): Promise<ethers.PopulatedTransaction>;
+        currencyAmountPair: CurrencyAmountPair,
+        chainId?: number
+    ): Promise<{
+        populatedTransaction: ethers.PopulatedTransaction;
+        nextDeposit: NextDepositResult['nextDeposit'];
+    }>;
 
     /**
      * Adds an unapproved tornado deposit transaction to the transaction state.
@@ -23,7 +28,7 @@ export interface IDeposit {
     addAsNewDepositTransaction(
         currencyAmountPair: CurrencyAmountPair,
         populatedTransaction: ethers.PopulatedTransaction,
-        feeData: FeeData,
+        feeData: TransactionFeeData,
         approveUnlimited?: boolean
     ): Promise<TransactionMeta>;
 
@@ -34,7 +39,7 @@ export interface IDeposit {
      */
     updateDepositTransactionGas(
         transactionId: string,
-        feeData: FeeData
+        feeData: TransactionFeeData
     ): Promise<void>;
 
     /**
@@ -43,7 +48,9 @@ export interface IDeposit {
      */
     approveDepositTransaction(
         transactionId: string,
-        currencyAmountPair?: CurrencyAmountPair
+        currencyAmountPair?: CurrencyAmountPair,
+        chainId?: number,
+        nextDeposit?: NextDepositResult['nextDeposit']
     ): Promise<void>;
 
     /**
@@ -63,7 +70,7 @@ export interface IDeposit {
      */
     deposit(
         currencyAmountPair: CurrencyAmountPair,
-        feeData: FeeData,
+        feeData: TransactionFeeData,
         approveUnlimited?: boolean
     ): Promise<string>;
 }

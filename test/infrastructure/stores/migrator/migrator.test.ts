@@ -39,7 +39,7 @@ describe('State Migrator', () => {
         GasPricesController: {
             gasPriceData: {
                 5: {
-                    gasPrices: {
+                    gasPricesLevels: {
                         average: { gasPrice: BigNumber.from('2000000000') },
                         fast: { gasPrice: BigNumber.from('2000000000') },
                         slow: { gasPrice: BigNumber.from('2000000000') },

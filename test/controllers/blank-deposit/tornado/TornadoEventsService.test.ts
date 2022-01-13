@@ -74,7 +74,8 @@ describe('TornadoEventsService', () => {
             mockKeyringController,
             networkController,
             tokenController,
-            tokenOperationsController
+            tokenOperationsController,
+            preferencesController
         );
 
         incomingTransactionController = new IncomingTransactionController(

@@ -75,7 +75,8 @@ describe('TransferTransaction implementation', function () {
             mockKeyringController,
             networkController,
             tokenController,
-            tokenOperationsController
+            tokenOperationsController,
+            preferencesController
         );
 
         transactionController = new TransactionController(

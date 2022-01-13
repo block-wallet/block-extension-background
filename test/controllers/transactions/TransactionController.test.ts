@@ -4,7 +4,10 @@ import sinon from 'sinon';
 import { TypedTransaction } from '@ethereumjs/tx';
 import { TokenController } from '@blank/background/controllers/erc-20/TokenController';
 import { TokenOperationsController } from '@blank/background/controllers/erc-20/transactions/Transaction';
-import { GasPricesController } from '@blank/background/controllers/GasPricesController';
+import {
+    GasPriceData,
+    GasPricesController,
+} from '@blank/background/controllers/GasPricesController';
 import PermissionsController from '@blank/background/controllers/PermissionsController';
 import initialState from '@blank/background/utils/constants/initialState';
 import NetworkController from '../../../src/controllers/NetworkController';
@@ -17,11 +20,15 @@ import { getNetworkControllerInstance } from 'test/mocks/mock-network-instance';
 import { mockPreferencesController } from 'test/mocks/mock-preferences';
 import { mockedPermissionsController } from 'test/mocks/mock-permissions';
 import {
+    MetaType,
     TransactionCategories,
     TransactionMeta,
     TransactionStatus,
 } from '@blank/background/controllers/transactions/utils/types';
 import { ProviderError } from '@blank/background/utils/types/ethereum';
+import { FeeData } from '@ethersproject/abstract-provider';
+
+// TODO: Test gas override
 
 describe('Transactions Controller', () => {
     const providerMock = {
@@ -117,6 +124,9 @@ describe('Transactions Controller', () => {
                 on: (event: string, func: Function) => {},
                 getCode: (addresOrName: string) => Promise.resolve('0xabc'),
             });
+            sinon.stub(gasPricesController, 'getState').returns({
+                blockGasLimit: BigNumber.from('20000000'),
+            } as GasPriceData);
 
             const { gasLimit, estimationSucceeded } =
                 await transactionController.estimateGas({
@@ -146,6 +156,10 @@ describe('Transactions Controller', () => {
                 }),
                 getCode: (addresOrName: string) => Promise.resolve('0xabc'),
             });
+            sinon.stub(gasPricesController, 'getState').returns({
+                blockGasLimit: BigNumber.from('200000'),
+            } as GasPriceData);
+
             const { gasLimit, estimationSucceeded } =
                 await transactionController.estimateGas({
                     transactionParams: {
@@ -173,6 +187,9 @@ describe('Transactions Controller', () => {
                 }),
                 getCode: (addresOrName: string) => Promise.resolve('0xabc'),
             });
+            sinon.stub(gasPricesController, 'getState').returns({
+                blockGasLimit: BigNumber.from('200000'),
+            } as GasPriceData);
 
             const { gasLimit, estimationSucceeded } =
                 await transactionController.estimateGas(
@@ -202,6 +219,9 @@ describe('Transactions Controller', () => {
                 on: (event: string, func: Function) => {},
                 getCode: (addresOrName: string) => Promise.resolve('0xabc'),
             });
+            sinon.stub(gasPricesController, 'getState').returns({
+                blockGasLimit: BigNumber.from('200000'),
+            } as GasPriceData);
 
             // It should return upperGasLimit //
             const gasEstimation = await transactionController.estimateGas({
@@ -229,6 +249,9 @@ describe('Transactions Controller', () => {
                 }),
                 getCode: (addresOrName: string) => Promise.resolve('0xabc'),
             });
+            sinon.stub(gasPricesController, 'getState').returns({
+                blockGasLimit: BigNumber.from('200000'),
+            } as GasPriceData);
 
             const gasEstimation2 = await transactionController.estimateGas({
                 transactionParams: {
@@ -257,6 +280,10 @@ describe('Transactions Controller', () => {
                 }),
                 getCode: (addresOrName: string) => Promise.resolve('0x0'),
             });
+            sinon.stub(gasPricesController, 'getState').returns({
+                blockGasLimit: BigNumber.from('200000'),
+            } as GasPriceData);
+
             const { gasLimit, estimationSucceeded } =
                 await transactionController.estimateGas({
                     transactionParams: {
@@ -288,6 +315,10 @@ describe('Transactions Controller', () => {
                 }),
                 getCode: (addresOrName: string) => Promise.resolve('0x0'),
             });
+            sinon.stub(gasPricesController, 'getState').returns({
+                blockGasLimit: BigNumber.from('200000'),
+            } as GasPriceData);
+
             const { gasLimit, estimationSucceeded } =
                 await transactionController.estimateGas({
                     transactionParams: {
@@ -306,7 +337,7 @@ describe('Transactions Controller', () => {
     describe('Transactions', () => {
         let mockedProvider: sinon.SinonStub<
             [],
-            providers.InfuraProvider | providers.StaticJsonRpcProvider
+            providers.StaticJsonRpcProvider
         >;
 
         beforeEach(() => {
@@ -333,13 +364,11 @@ describe('Transactions Controller', () => {
                 networkController
             );
 
-            sinon.stub(gasPricesController, 'getFeeData').returns(
-                Promise.resolve({
-                    maxFeePerGas: BigNumber.from('200000000000'),
-                    maxPriorityFeePerGas: BigNumber.from('1000000000'),
-                    gasPrice: BigNumber.from('100000000000'),
-                })
-            );
+            sinon.stub(gasPricesController, 'getFeeData').returns({
+                maxFeePerGas: BigNumber.from('200000000000'),
+                maxPriorityFeePerGas: BigNumber.from('1000000000'),
+                gasPrice: BigNumber.from('100000000000'),
+            });
 
             sinon.stub(gasPricesController, 'store').get(() => ({
                 getState: () => ({
@@ -878,7 +907,7 @@ describe('Transactions Controller', () => {
             ).to.be.equal('1000000000');
         });
 
-        it('Should cancel a EIP-1559 transaction correctly', async () => {
+        it('Should cancel an EIP-1559 transaction correctly', async () => {
             sinon.stub(transactionController, 'estimateGas').returns(
                 Promise.resolve({
                     estimationSucceeded: true,
@@ -926,7 +955,7 @@ describe('Transactions Controller', () => {
                         return hash ===
                             '0x4930060e5e465f32c78cea9d467b8d7e9176653cd0416040c44af404dac53fed'
                             ? Promise.resolve({
-                                  status: '1',
+                                  status: 1,
                               })
                             : Promise.resolve(null);
                     },
@@ -977,7 +1006,7 @@ describe('Transactions Controller', () => {
             await transactionController.queryTransactionStatuses(2);
 
             return promise;
-        });
+        }).timeout;
 
         it('Should cancel a legacy pre EIP-1559 transaction correctly', async () => {
             sinon.stub(transactionController, 'estimateGas').returns(
@@ -988,7 +1017,7 @@ describe('Transactions Controller', () => {
             );
 
             sinon
-                .stub(gasPricesController, 'getEIP1559Compatibility')
+                .stub(networkController, 'getEIP1559Compatibility')
                 .returns(Promise.resolve(false));
 
             mockedProvider.restore();
@@ -1030,7 +1059,7 @@ describe('Transactions Controller', () => {
                         return hash ===
                             '0x4930060e5e465f32c78cea9d467b8d7e9176653cd0416040c44af404dac53fed'
                             ? Promise.resolve({
-                                  status: '1',
+                                  status: 1,
                               })
                             : Promise.resolve(null);
                     },
@@ -1122,7 +1151,7 @@ describe('Transactions Controller', () => {
             );
 
             sinon
-                .stub(gasPricesController, 'getEIP1559Compatibility')
+                .stub(networkController, 'getEIP1559Compatibility')
                 .returns(Promise.resolve(false));
 
             const { transactionMeta, result } =
@@ -1162,55 +1191,13 @@ describe('Transactions Controller', () => {
                     gasPrice: BigNumber.from('1000000000'),
                     nonce: 2,
                 },
+                metaType: MetaType.REGULAR,
             } as TransactionMeta);
 
             await transactionController.queryTransactionStatuses(1);
             expect(
                 transactionController.store.getState().transactions[0].status
             ).to.be.equal(TransactionStatus.SUBMITTED);
-        });
-
-        it('Should transition to DROPPED a failed transaction with no transaction object response', async () => {
-            mockedProvider.restore();
-            mockedProvider = sinon
-                .stub(networkController, 'getProvider')
-                .returns({
-                    ...providerMock,
-                    getTransactionReceipt: () =>
-                        Promise.resolve({
-                            status: '0',
-                        }),
-                });
-
-            transactionController.store.getState().transactions.push({
-                id: '123',
-                chainId: 5,
-                status: TransactionStatus.SUBMITTED,
-                transactionHash: '1338',
-                blocksDropCount: 0,
-                loadingGasValues: false,
-                time: new Date().getTime(),
-                transactionParams: {
-                    from: mockedAccounts.goerli[0].address,
-                    to: mockedAccounts.goerli[1].address,
-                    value: BigNumber.from('1'),
-                    gasPrice: BigNumber.from('1000000000'),
-                    nonce: 2,
-                },
-            } as TransactionMeta);
-
-            await transactionController.queryTransactionStatuses(1);
-            expect(
-                transactionController.store.getState().transactions[0].status
-            ).to.be.equal(TransactionStatus.DROPPED);
-            expect(transactionController.store.getState().transactions[0].error)
-                .to.not.be.undefined;
-            expect(
-                transactionController.store.getState().transactions[0].error
-                    ?.message
-            ).to.be.equal(
-                'Transaction failed. The transaction was dropped or replaced by a new one'
-            );
         });
 
         it('Should transition to CONFIRMED a transaction that was included in a block', async () => {
@@ -1241,6 +1228,7 @@ describe('Transactions Controller', () => {
                     gasPrice: BigNumber.from('1000000000'),
                     nonce: 2,
                 },
+                metaType: MetaType.REGULAR,
             } as TransactionMeta);
 
             await transactionController.queryTransactionStatuses(1);
@@ -1278,6 +1266,7 @@ describe('Transactions Controller', () => {
                     gasPrice: BigNumber.from('1000000000'),
                     nonce: 2,
                 },
+                metaType: MetaType.REGULAR,
             } as TransactionMeta);
 
             await transactionController.queryTransactionStatuses(1);
@@ -1302,7 +1291,7 @@ describe('Transactions Controller', () => {
                     ...providerMock,
                     getTransactionReceipt: () =>
                         Promise.resolve({
-                            status: '0',
+                            status: 0,
                         }),
                 });
 
@@ -1321,6 +1310,7 @@ describe('Transactions Controller', () => {
                     gasPrice: BigNumber.from('1000000000'),
                     nonce: 2,
                 },
+                metaType: MetaType.REGULAR,
             } as TransactionMeta);
 
             await transactionController.queryTransactionStatuses(1);
@@ -1332,7 +1322,9 @@ describe('Transactions Controller', () => {
             expect(
                 transactionController.store.getState().transactions[0].error
                     ?.message
-            ).to.be.equal('Transaction failed. The transaction was reversed');
+            ).to.be.equal(
+                'Transaction failed. The transaction was reverted by the EVM'
+            );
             expect(
                 transactionController.store.getState().transactions[0]
                     .verifiedOnBlockchain
@@ -1341,7 +1333,7 @@ describe('Transactions Controller', () => {
                 transactionController.store.getState().transactions[0]
                     .transactionReceipt
             ).to.be.deep.equal({
-                status: '0',
+                status: 0,
             });
         });
 
@@ -1374,6 +1366,7 @@ describe('Transactions Controller', () => {
                     gasPrice: BigNumber.from('1000000000'),
                     nonce: 2,
                 },
+                metaType: MetaType.REGULAR,
             } as TransactionMeta);
 
             await transactionController.queryTransactionStatuses(2);
@@ -1393,6 +1386,11 @@ describe('Transactions Controller', () => {
                             blockNumber: 1,
                             timestamp: new Date().getTime() / 1000,
                         }),
+                    getTransactionReceipt: () => {
+                        return Promise.resolve({
+                            status: 1,
+                        });
+                    },
                 });
 
             transactionController.store.getState().transactions.push({
@@ -1411,6 +1409,7 @@ describe('Transactions Controller', () => {
                     gasPrice: BigNumber.from('1000000000'),
                     nonce: 2,
                 },
+                metaType: MetaType.REGULAR,
             } as TransactionMeta);
 
             await transactionController.queryTransactionStatuses(5);
@@ -1517,6 +1516,7 @@ describe('Transactions Controller', () => {
                     gasPrice: BigNumber.from('1000000000'),
                     nonce: 2,
                 },
+                metaType: MetaType.REGULAR,
             } as TransactionMeta);
 
             await transactionController.addTransaction(
@@ -1535,6 +1535,101 @@ describe('Transactions Controller', () => {
             expect(
                 transactions[0].transactionParams.value?.toString()
             ).to.be.equal('100');
+        });
+    });
+
+    describe('Ensuring gas configuration', async () => {
+        beforeEach(() => {
+            // Instantiate objects
+            networkController = getNetworkControllerInstance();
+
+            preferencesController = mockPreferencesController;
+            preferencesController.setSelectedAddress(
+                mockedAccounts['goerli'][0].address
+            );
+
+            gasPricesController = new GasPricesController(
+                initialState.GasPricesController,
+                networkController
+            );
+
+            transactionController = new TransactionController(
+                networkController,
+                preferencesController,
+                mockedPermissionsController,
+                gasPricesController,
+                {
+                    transactions: [],
+                },
+                async (ethTx: TypedTransaction) => {
+                    const privateKey = Buffer.from(
+                        mockedAccounts.goerli[0].key,
+                        'hex'
+                    );
+                    return Promise.resolve(ethTx.sign(privateKey));
+                },
+                { txHistoryLimit: 40 }
+            );
+
+            sinon
+                .stub(transactionController['_signatureRegistry'], 'lookup')
+                .returns(Promise.resolve('multicall(bytes[] data)'));
+        });
+
+        afterEach(() => {
+            sinon.restore();
+        });
+
+        it('For EIP1559 network', async () => {
+            sinon.stub(networkController, 'getEIP1559Compatibility').returns(
+                new Promise((resolve) => {
+                    resolve(true);
+                })
+            );
+            sinon.stub(gasPricesController, 'getFeeData').returns({
+                gasPrice: null,
+                maxFeePerGas: BigNumber.from('1000'),
+                maxPriorityFeePerGas: BigNumber.from('200'),
+            } as FeeData);
+
+            const updatedTx = await (
+                transactionController as any
+            ).getGasPricesValues(
+                { transactionParams: {} } as TransactionMeta,
+                5
+            );
+
+            expect(updatedTx).deep.equal({
+                transactionParams: {
+                    maxFeePerGas: BigNumber.from('1000'),
+                    maxPriorityFeePerGas: BigNumber.from('200'),
+                },
+            } as TransactionMeta);
+        });
+        it('For non EIP1559 network', async () => {
+            sinon.stub(networkController, 'getEIP1559Compatibility').returns(
+                new Promise((resolve) => {
+                    resolve(false);
+                })
+            );
+            sinon.stub(gasPricesController, 'getFeeData').returns({
+                gasPrice: BigNumber.from('10'),
+                maxFeePerGas: null,
+                maxPriorityFeePerGas: null,
+            } as FeeData);
+
+            const updatedTx = await (
+                transactionController as any
+            ).getGasPricesValues(
+                { transactionParams: {} } as TransactionMeta,
+                5
+            );
+
+            expect(updatedTx).deep.equal({
+                transactionParams: {
+                    gasPrice: BigNumber.from('10'),
+                },
+            } as TransactionMeta);
         });
     });
 });

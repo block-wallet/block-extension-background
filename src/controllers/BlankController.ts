@@ -88,6 +88,7 @@ import type {
     RequestUserSettings,
     RequestCancelTransaction,
     RequestSpeedUpTransaction,
+    RequestNextNonce,
 } from '../utils/types/communication';
 
 import EventEmitter from 'events';
@@ -273,6 +274,7 @@ export default class BlankController extends EventEmitter {
             this.networkController,
             this.tokenController,
             this.tokenOperationsController,
+            this.preferencesController,
             initState.AccountTrackerController
         );
 
@@ -322,7 +324,6 @@ export default class BlankController extends EventEmitter {
             tokenOperationsController: this.tokenOperationsController,
             tokenController: this.tokenController,
             gasPricesController: this.gasPricesController,
-            blockUpdatesController: this.blockUpdatesController,
             tornadoEventsService: this.tornadoEventsService,
             initialState: initState.BlankDepositController,
         });
@@ -347,8 +348,7 @@ export default class BlankController extends EventEmitter {
             this.permissionsController,
             this.appStateController,
             this.keyringController,
-            this.tokenController,
-            this.blockUpdatesController
+            this.tokenController
         );
 
         this.addressBookController = new AddressBookController({
@@ -369,8 +369,8 @@ export default class BlankController extends EventEmitter {
             ExchangeRatesController: this.exchangeRatesController.store,
             GasPricesController: this.gasPricesController.store,
             BlankDepositController: this.blankDepositController.store,
-            IncomingTransactionController: this.incomingTransactionController
-                .store,
+            IncomingTransactionController:
+                this.incomingTransactionController.store,
             TokenController: this.tokenController.store,
             PermissionsController: this.permissionsController.store,
             AddressBookController: this.addressBookController.store,
@@ -388,8 +388,8 @@ export default class BlankController extends EventEmitter {
             ExchangeRatesController: this.exchangeRatesController.store,
             GasPricesController: this.gasPricesController.store,
             BlankDepositController: this.blankDepositController.UIStore,
-            IncomingTransactionController: this.incomingTransactionController
-                .store,
+            IncomingTransactionController:
+                this.incomingTransactionController.store,
             TokenController: this.tokenController.store,
             ActivityListController: this.activityListController.store,
             PermissionsController: this.permissionsController.store,
@@ -426,8 +426,8 @@ export default class BlankController extends EventEmitter {
         const activeSubscriptions = Object.keys(this.subscriptions).length;
 
         // Check if app is unlocked
-        const isAppUnlocked = this.appStateController.UIStore.getState()
-            .isAppUnlocked;
+        const isAppUnlocked =
+            this.appStateController.UIStore.getState().isAppUnlocked;
 
         // Start/stop controllers
         if (activeSubscriptions > 0 && isAppUnlocked) {
@@ -713,8 +713,6 @@ export default class BlankController extends EventEmitter {
                 return this.ensLookup(request as RequestEnsLookup);
             case Messages.TRANSACTION.GET_LATEST_GAS_PRICE:
                 return this.getLatestGasPrice();
-            case Messages.TRANSACTION.GET_LATEST_BASE_FEE:
-                return this.getLatestBaseFee();
             case Messages.TRANSACTION.SEND_ETHER:
                 return this.sendEther(request as RequestSendEther);
             case Messages.TRANSACTION.ADD_NEW_SEND_TRANSACTION:
@@ -749,6 +747,8 @@ export default class BlankController extends EventEmitter {
                 return this.speedUpTransaction(
                     request as RequestSpeedUpTransaction
                 );
+            case Messages.TRANSACTION.GET_NEXT_NONCE:
+                return this.getNextNonce(request as RequestNextNonce);
             case Messages.WALLET.CREATE:
                 return this.walletCreate(request as RequestWalletCreate);
             case Messages.WALLET.IMPORT:
@@ -863,9 +863,16 @@ export default class BlankController extends EventEmitter {
         password,
         encryptPassword,
     }: RequestAccountExportJson): Promise<string> {
-        await this.keyringController.verifyPassword(password);
-        const privateKey = await this.keyringController.exportAccount(address);
-        return getAccountJson(privateKey, encryptPassword);
+        try {
+            await this.keyringController.verifyPassword(password);
+            const privateKey = await this.keyringController.exportAccount(
+                address
+            );
+            return getAccountJson(privateKey, encryptPassword);
+        } catch (error) {
+            log.warn(error);
+            throw Error('Error exporting account');
+        }
     }
 
     /**
@@ -880,8 +887,13 @@ export default class BlankController extends EventEmitter {
         address,
         password,
     }: RequestAccountExportPK): Promise<string> {
-        await this.keyringController.verifyPassword(password);
-        return this.keyringController.exportAccount(address);
+        try {
+            await this.keyringController.verifyPassword(password);
+            return await this.keyringController.exportAccount(address);
+        } catch (error) {
+            log.warn(error);
+            throw Error('Error exporting account');
+        }
     }
 
     /**
@@ -1000,8 +1012,12 @@ export default class BlankController extends EventEmitter {
      * @param password user's password
      */
     private async unlockApp({ password }: RequestAppUnlock): Promise<boolean> {
-        await this.appStateController.unlock(password);
-        return true;
+        try {
+            await this.appStateController.unlock(password);
+            return true;
+        } catch {
+            return false;
+        }
     }
 
     /**
@@ -1081,9 +1097,7 @@ export default class BlankController extends EventEmitter {
      * It checks for possible spent notes and updates their internal state
      */
     private async updateNotesSpentState() {
-        // Run the method asynchronously and return
-        this.blankDepositController.updateNotesSpentState();
-        return;
+        return this.blankDepositController.updateNotesSpentState();
     }
 
     /**
@@ -1130,14 +1144,16 @@ export default class BlankController extends EventEmitter {
     }
 
     /**
-     * Method to approve transaction proposed by external source
+     * Method to confirm a transaction
      *
-     * @param transactionMeta - transaction data
-     * @param tabId - id of the tab where the extension is opened (needed to close the window)
+     * @param id - id of the transaction being confirmed.
+     * @param feeData - fee data selected by the user. Will update transaction's data if needed.
+     * @param advancedData - advanced data that can be changed by the user to apply to the transaction. For now customNonce
      */
     private async confirmTransaction({
         id,
         feeData,
+        advancedData,
     }: RequestConfirmTransaction) {
         const meta = this.transactionController.getTransaction(id);
 
@@ -1145,7 +1161,7 @@ export default class BlankController extends EventEmitter {
             throw new Error('The specified transaction was not found');
         }
 
-        // If found, only update the transaction fee related values
+        // If found, update the transaction fee & advanced data related values
         this.transactionController.updateTransaction({
             ...meta,
             transactionParams: {
@@ -1157,7 +1173,11 @@ export default class BlankController extends EventEmitter {
                     meta.transactionParams.maxPriorityFeePerGas,
                 maxFeePerGas:
                     feeData.maxFeePerGas || meta.transactionParams.maxFeePerGas,
+
+                nonce:
+                    advancedData?.customNonce || meta.transactionParams.nonce, // custom nonce update
             },
+            flashbots: advancedData?.flashbots || meta.flashbots, // flashbots update
         });
 
         return this.transactionController.approveTransaction(id);
@@ -1200,11 +1220,12 @@ export default class BlankController extends EventEmitter {
 
         // If pair was provided filter for that as well
         if (pair) {
-            depositsMadeFromWithdrawalAddress = depositsMadeFromWithdrawalAddress.filter(
-                (d) =>
-                    d.pair.amount === pair.amount &&
-                    d.pair.currency === pair.currency
-            );
+            depositsMadeFromWithdrawalAddress =
+                depositsMadeFromWithdrawalAddress.filter(
+                    (d) =>
+                        d.pair.amount === pair.amount &&
+                        d.pair.currency === pair.currency
+                );
         }
 
         return depositsMadeFromWithdrawalAddress.length !== 0;
@@ -1233,9 +1254,10 @@ export default class BlankController extends EventEmitter {
             }
             address = accountAddressOrIndex;
         } else if (typeof accountAddressOrIndex === 'number') {
-            const account = await this.accountTrackerController.getAccountByIndex(
-                accountAddressOrIndex
-            );
+            const account =
+                await this.accountTrackerController.getAccountByIndex(
+                    accountAddressOrIndex
+                );
 
             address = account.address;
         }
@@ -1482,8 +1504,12 @@ export default class BlankController extends EventEmitter {
     private async passwordVerify({
         password,
     }: RequestPasswordVerify): Promise<boolean> {
-        await this.keyringController.verifyPassword(password);
-        return true;
+        try {
+            await this.keyringController.verifyPassword(password);
+            return true;
+        } catch {
+            return false;
+        }
     }
 
     // Permissions
@@ -1568,6 +1594,7 @@ export default class BlankController extends EventEmitter {
         to,
         value,
         feeData,
+        advancedData,
     }: RequestSendEther): Promise<string> {
         // Add unapproved trasaction
         const {
@@ -1578,6 +1605,7 @@ export default class BlankController extends EventEmitter {
                 from: this.preferencesController.getSelectedAddress(),
                 value,
                 ...feeData,
+                nonce: advancedData.customNonce,
             },
             'blank'
         );
@@ -1614,17 +1642,16 @@ export default class BlankController extends EventEmitter {
         feeData,
     }: RequestAddAsNewSendTransaction): Promise<TransactionMeta> {
         if (this.tokenController.isNativeToken(address)) {
-            const {
-                transactionMeta,
-            } = await this.transactionController.addTransaction(
-                {
-                    to,
-                    from: this.preferencesController.getSelectedAddress(),
-                    value: BigNumber.from(value),
-                    ...feeData,
-                },
-                'blank'
-            );
+            const { transactionMeta } =
+                await this.transactionController.addTransaction(
+                    {
+                        to,
+                        from: this.preferencesController.getSelectedAddress(),
+                        value: BigNumber.from(value),
+                        ...feeData,
+                    },
+                    'blank'
+                );
 
             const { nativeCurrency, iconUrls } = this.networkController.network;
             const logo = iconUrls ? iconUrls[0] : '';
@@ -1699,14 +1726,7 @@ export default class BlankController extends EventEmitter {
      * It returns the current network latest gas price
      */
     private async getLatestGasPrice(): Promise<BigNumber> {
-        return this.gasPricesController.getGasPrice();
-    }
-
-    /**
-     * It returns current network base fee per gas
-     */
-    private async getLatestBaseFee(): Promise<BigNumber> {
-        return this.gasPricesController.getBaseFeePerGas();
+        return BigNumber.from(this.gasPricesController.getFeeData().gasPrice!);
     }
 
     /**
@@ -1843,9 +1863,6 @@ export default class BlankController extends EventEmitter {
         seedPhrase,
         reImport,
     }: RequestWalletImport): Promise<boolean> {
-        // Clear known identities
-        this.preferencesController.setSelectedAddress('');
-
         // Clear accounts in accountTracker
         this.accountTrackerController.clearAccounts();
 
@@ -1917,7 +1934,15 @@ export default class BlankController extends EventEmitter {
     private async getSeedPhrase({
         password,
     }: RequestSeedPhrase): Promise<string> {
-        return this.keyringController.verifySeedPhrase(password);
+        try {
+            const seedPhrase = await this.keyringController.verifySeedPhrase(
+                password
+            );
+            return seedPhrase;
+        } catch (error) {
+            log.warn(error);
+            throw Error('Error verifying seed phrase');
+        }
     }
 
     /**
@@ -1929,9 +1954,15 @@ export default class BlankController extends EventEmitter {
         password,
         seedPhrase,
     }: RequestVerifySeedPhrase): Promise<boolean> {
-        const vaultSeedPhrase = await this.keyringController.verifySeedPhrase(
-            password
-        );
+        let vaultSeedPhrase = '';
+        try {
+            vaultSeedPhrase = await this.keyringController.verifySeedPhrase(
+                password
+            );
+        } catch (error) {
+            log.warn(error);
+            throw Error('Error verifying seed phrase');
+        }
         if (seedPhrase === vaultSeedPhrase) {
             this.onboardingController.isSeedPhraseBackedUp = true;
             return true;
@@ -1990,15 +2021,26 @@ export default class BlankController extends EventEmitter {
         >(id, port);
 
         const handleSubscription = (eventData: ExternalEventSubscription) => {
-            if (eventData.eventName === ProviderEvents.accountsChanged) {
-                cb(
-                    this.blankProviderController.handleAccountUpdates(
-                        portId,
-                        eventData
-                    )
-                );
-            } else {
-                cb(eventData);
+            switch (eventData.eventName) {
+                case ProviderEvents.accountsChanged:
+                    cb(
+                        this.blankProviderController.handleAccountUpdates(
+                            portId,
+                            eventData
+                        )
+                    );
+                    break;
+                case ProviderEvents.message:
+                    if (eventData.portId === portId) {
+                        cb({
+                            eventName: eventData.eventName,
+                            payload: eventData.payload,
+                        });
+                    }
+                    break;
+                default:
+                    cb(eventData);
+                    break;
             }
         };
 
@@ -2103,13 +2145,9 @@ export default class BlankController extends EventEmitter {
         logo,
         type,
     }: RequestAddCustomToken): Promise<void | void[]> {
-        await this.tokenController.addCustomToken(
+        return this.tokenController.addCustomToken(
             new Token(address, name, symbol, decimals, logo, type)
         );
-
-        return this.accountTrackerController.updateAccounts([
-            this.preferencesController.getSelectedAddress(),
-        ]);
     }
 
     /**
@@ -2139,14 +2177,11 @@ export default class BlankController extends EventEmitter {
         accountAddress,
         chainId,
     }: RequestAddCustomTokens): Promise<void | void[]> {
-        await this.tokenController.addCustomTokens(
+        return this.tokenController.addCustomTokens(
             tokens,
             accountAddress,
             chainId
         );
-        return this.accountTrackerController.updateAccounts([
-            this.preferencesController.getSelectedAddress(),
-        ]);
     }
 
     /**
@@ -2162,6 +2197,7 @@ export default class BlankController extends EventEmitter {
         to,
         value,
         feeData,
+        advancedData,
     }: RequestSendToken): Promise<string> {
         /**
          * Old Method
@@ -2170,7 +2206,13 @@ export default class BlankController extends EventEmitter {
 
         const transferTransaction = this.getTransferTransaction();
 
-        return transferTransaction.do(tokenAddress, to, value, feeData);
+        return transferTransaction.do(
+            tokenAddress,
+            to,
+            value,
+            feeData,
+            advancedData
+        );
     }
 
     /**
@@ -2318,5 +2360,17 @@ export default class BlankController extends EventEmitter {
     }: RequestUserSettings): Promise<boolean> {
         this.preferencesController.settings = settings;
         return true;
+    }
+
+    /**
+     * Gets the next nonce for the provided address
+     * @param address network address to get the nonce from
+     *
+     * @returns - Nonce number
+     */
+    private async getNextNonce({
+        address,
+    }: RequestNextNonce): Promise<number | undefined> {
+        return this.transactionController.getNextNonce(address);
     }
 }

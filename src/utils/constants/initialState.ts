@@ -131,6 +131,7 @@ const initialState: BlankAppState = {
         isNetworkChanging: false,
         isUserNetworkOnline: true,
         isProviderNetworkOnline: true,
+        isEIP1559Compatible: {},
     },
     ExchangeRatesController: {
         exchangeRates: { ETH: 0 },
@@ -143,12 +144,24 @@ const initialState: BlankAppState = {
     GasPricesController: {
         gasPriceData: {
             1: {
-                gasPrices: {
-                    average: { gasPrice: BigNumber.from(0) },
-                    fast: { gasPrice: BigNumber.from(0) },
-                    slow: { gasPrice: BigNumber.from(0) },
+                blockGasLimit: BigNumber.from(0),
+                gasPricesLevels: {
+                    average: {
+                        gasPrice: null,
+                        maxFeePerGas: null,
+                        maxPriorityFeePerGas: null,
+                    },
+                    fast: {
+                        gasPrice: null,
+                        maxFeePerGas: null,
+                        maxPriorityFeePerGas: null,
+                    },
+                    slow: {
+                        gasPrice: null,
+                        maxFeePerGas: null,
+                        maxPriorityFeePerGas: null,
+                    },
                 },
-                isEIP1559Compatible: undefined,
             },
         },
     },

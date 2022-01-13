@@ -24,7 +24,6 @@ import { TornadoRelayerMock } from './mocks/TornadoRelayer.mock';
 import { PendingWithdrawalStatus } from '../../../../src/controllers/blank-deposit/BlankDepositController';
 import { mockPreferencesController } from '../../../mocks/mock-preferences';
 import mockIndexedDB from './mocks/mockIndexedDB';
-import mockNetworkController from '../../../mocks/NetworkController.mock';
 
 import {
     DepositEventsMock,
@@ -52,1202 +51,1164 @@ import { AccountTrackerController } from '@blank/background/controllers/AccountT
 import { mockKeyringController } from '../../../mocks/mock-keyring-controller';
 import { TornadoEventsService } from '@blank/background/controllers/blank-deposit/tornado/TornadoEventsService';
 import TransactionController from '@blank/background/controllers/transactions/TransactionController';
+import {
+    Deposit,
+    Withdrawal,
+} from '@blank/background/controllers/blank-deposit/tornado/stores/ITornadoEventsDB';
 
-describe('Tornado', () => {
-    describe('TornadoService', () => {
-        // Re-mock IndexedDb on each test
-        if (typeof process === 'object') {
-            mockIndexedDB();
-        }
+describe('TornadoService', () => {
+    // Re-mock IndexedDb on each test
+    if (typeof process === 'object') {
+        mockIndexedDB();
+    }
 
-        const testPass = 'test_pass';
-        const mnemonic =
-            'reject hood palace sad female review depth camp clown peace social real behave rib ability cereal grab illness settle process gate lizard uniform glimpse';
+    const testPass = 'test_pass';
+    const mnemonic =
+        'reject hood palace sad female review depth camp clown peace social real behave rib ability cereal grab illness settle process gate lizard uniform glimpse';
 
-        const accounts = {
-            goerli: [
-                {
-                    key: '',
-                    address: '',
+    const accounts = {
+        goerli: [
+            {
+                key: '',
+                address: '',
+            },
+            {
+                key: '',
+                address: '',
+            },
+        ],
+    };
+
+    let networkController: NetworkController;
+    let accountTrackerController: AccountTrackerController;
+    let transactionController: TransactionController;
+    let preferencesController: PreferencesController;
+    let tokenController: TokenController;
+    let tornadoEventsDB: TornadoEventsDB;
+    let tornadoService: TornadoService;
+    let tokenOperationsController: TokenOperationsController;
+    let permissionsController: PermissionsController;
+    let gasPricesController: GasPricesController;
+    let blockUpdatesController: BlockUpdatesController;
+    let exchangeRatesController: ExchangeRatesController;
+    let incomingTransactionController: IncomingTransactionController;
+    let tornadoEventsService: TornadoEventsService;
+    let mockedContract: {
+        filters: { Deposit: () => string; Withdrawal: () => void };
+        queryFilter: (filter: TornadoEvents, ...args: any) => any;
+    };
+
+    beforeEach(async () => {
+        preferencesController = mockPreferencesController;
+        networkController = getNetworkControllerInstance();
+        permissionsController = mockedPermissionsController;
+        gasPricesController = new GasPricesController(
+            initialState.GasPricesController,
+            networkController
+        );
+
+        mockedContract = {
+            filters: {
+                Deposit: () => {
+                    return 'Deposit';
                 },
-                {
-                    key: '',
-                    address: '',
+                Withdrawal: () => {
+                    'Withdrawal';
                 },
-            ],
+            },
+            queryFilter: (filter: TornadoEvents, ...args: any) => {
+                return filter === TornadoEvents.DEPOSIT
+                    ? DepositEventsMock.events
+                    : WithdrawalEventsMock.events;
+            },
         };
 
-        let networkController: NetworkController;
-        let accountTrackerController: AccountTrackerController;
-        let transactionController: TransactionController;
-        let preferencesController: PreferencesController;
-        let tokenController: TokenController;
-        let tornadoEventsDB: TornadoEventsDB;
-        let tornadoService: TornadoService;
-        let tokenOperationsController: TokenOperationsController;
-        let permissionsController: PermissionsController;
-        let gasPricesController: GasPricesController;
-        let blockUpdatesController: BlockUpdatesController;
-        let exchangeRatesController: ExchangeRatesController;
-        let incomingTransactionController: IncomingTransactionController;
-        let tornadoEventsService: TornadoEventsService;
-        let mockedContract: {
-            filters: { Deposit: () => string; Withdrawal: () => void };
-            queryFilter: (filter: TornadoEvents, ...args: any) => any;
-        };
+        tornadoEventsDB = new TornadoEventsDB('test-db');
+        await tornadoEventsDB.createStoreInstances();
 
-        beforeEach(async () => {
-            preferencesController = mockPreferencesController;
-            networkController = getNetworkControllerInstance();
-            permissionsController = mockedPermissionsController;
-            gasPricesController = new GasPricesController(
-                initialState.GasPricesController,
-                networkController
-            );
+        // Clear dbs on each run
+        clearDbs(tornadoEventsDB);
 
-            mockedContract = {
-                filters: {
-                    Deposit: () => {
-                        return 'Deposit';
-                    },
-                    Withdrawal: () => {
-                        'Withdrawal';
-                    },
-                },
-                queryFilter: (filter: TornadoEvents, ...args: any) => {
-                    return filter === TornadoEvents.DEPOSIT
-                        ? DepositEventsMock.events
-                        : WithdrawalEventsMock.events;
-                },
-            };
+        tokenOperationsController = new TokenOperationsController({
+            networkController: networkController,
+        });
 
-            tornadoEventsDB = new TornadoEventsDB('test-db');
-            await tornadoEventsDB.createStoreInstances();
-
-            // Clear dbs on each run
-            clearDbs(tornadoEventsDB);
-
-            tokenOperationsController = new TokenOperationsController({
-                networkController: networkController,
-            });
-
-            tokenController = new TokenController(
-                {
-                    userTokens: {} as any,
-                    deletedUserTokens: {} as any,
-                },
-                {
-                    preferencesController,
-                    networkController,
-                    tokenOperationsController,
-                }
-            );
-
-            accountTrackerController = new AccountTrackerController(
-                mockKeyringController,
-                networkController,
-                tokenController,
-                tokenOperationsController
-            );
-
-            incomingTransactionController = new IncomingTransactionController(
-                networkController,
+        tokenController = new TokenController(
+            {
+                userTokens: {} as any,
+                deletedUserTokens: {} as any,
+            },
+            {
                 preferencesController,
-                accountTrackerController,
-                { incomingTransactions: {} }
-            );
-
-            transactionController = new TransactionController(
                 networkController,
-                preferencesController,
-                permissionsController,
-                gasPricesController,
-                {
-                    transactions: [],
-                },
-                async (ethTx: TypedTransaction) => {
-                    const privateKey = Buffer.from(
-                        accounts.goerli[0].key,
-                        'hex'
-                    );
-                    return Promise.resolve(ethTx.sign(privateKey));
-                },
-                { txHistoryLimit: 40 }
-            );
-
-            blockUpdatesController = new BlockUpdatesController(
-                networkController,
-                accountTrackerController,
-                gasPricesController,
-                exchangeRatesController,
-                incomingTransactionController,
-                transactionController,
-                { blockData: {} }
-            );
-
-            tornadoEventsService = new TornadoEventsService({
-                endpoint: 'http://localhost:8080',
-                version: 'v1',
-                blockUpdatesController,
-            });
-
-            tornadoService = new TornadoService({
-                networkController,
-                preferencesController,
                 tokenOperationsController,
-                tornadoEventsDB,
-                transactionController: (transactionController as unknown) as TransactionController,
-                gasPricesController,
-                tokenController,
-                encryptor: mockEncryptor,
-                initialState: {
-                    pendingWithdrawals: {
-                        mainnet: { pending: [] },
-                        goerli: { pending: [] },
-                    },
-                    vaultState: { vault: '' },
-                },
-                blockUpdatesController,
-                tornadoEventsService,
-            });
-            await (tornadoService as any).initDepositsIndexedDb();
-
-            tornadoService['_notesService']['workerRunner'] = {
-                run: async ({ name, data }: { name: string; data: string }) => {
-                    if (name === 'pedersenHash') {
-                        return babyJub.unpackPoint(
-                            pedersenHash.hash(Buffer.from(data, 'hex'))
-                        )[0];
-                    }
-                },
-            } as any;
-
-            await tornadoService.initializeVault(testPass);
-        });
-
-        afterEach(() => {
-            sinon.restore();
-        });
-
-        it('Should calculate the fees and total values correctly for 1 ETH', async () => {
-            await tornadoService.unlock(testPass, mnemonic);
-            const { total, fee } = tornadoService.calculateFeeAndTotal(
-                { amount: '1', currency: KnownCurrencies.ETH },
-                0.3,
-                {
-                    average: { gasPrice: BigNumber.from('97000000000') },
-                    fast: { gasPrice: BigNumber.from('97000000000') },
-                    slow: { gasPrice: BigNumber.from('97000000000') },
-                },
-                {
-                    dai: '283482591704018',
-                    cdai: '6066623185041',
-                    usdc: '282800357455943',
-                    usdt: '283794295053285',
-                    wbtc: '16207614089077625466',
-                }
-            );
-
-            expect(total.toString()).to.be.equal(
-                utils.parseEther('1').toString()
-            );
-            expect(fee.toString()).to.be.equal('59017500000000000');
-        });
-
-        it('Should calculate the fees and total values correctly for 100 DAI', async () => {
-            await tornadoService.unlock(testPass, mnemonic);
-            const { total, fee } = tornadoService.calculateFeeAndTotal(
-                { amount: '100', currency: KnownCurrencies.DAI },
-                0.3,
-                {
-                    average: { gasPrice: BigNumber.from('97000000000') },
-                    fast: { gasPrice: BigNumber.from('97000000000') },
-                    slow: { gasPrice: BigNumber.from('97000000000') },
-                },
-                {
-                    dai: '283482591704018',
-                    cdai: '6066623185041',
-                    usdc: '282800357455943',
-                    usdt: '283794295053285',
-                    wbtc: '16207614089077625466',
-                }
-            );
-
-            expect(total.toString()).to.be.equal(
-                utils.parseUnits('100', 18).toString()
-            );
-            expect(fee.toString()).to.be.equal('197904726495824626006');
-        });
-
-        it('Should drop the unsubmitted pending withdrawals and transition them to FAILED', async () => {
-            await tornadoService.unlock(testPass, mnemonic);
-            const deposits: IBlankDeposit[] = [
-                {
-                    id: '1',
-                    depositIndex: 1,
-                    note: '0abb21233921',
-                    nullifierHex: '0x1',
-                    pair: { amount: '1', currency: KnownCurrencies.ETH },
-                    status: DepositStatus.CONFIRMED,
-                    timestamp: new Date().getTime(),
-                    spent: false,
-                    depositAddress: '0xa',
-                },
-                {
-                    id: '2',
-                    depositIndex: 2,
-                    note: '0cdd35333935',
-                    nullifierHex: '0x2',
-                    pair: { amount: '1', currency: KnownCurrencies.ETH },
-                    status: DepositStatus.CONFIRMED,
-                    timestamp: new Date().getTime(),
-                    spent: false,
-                    depositAddress: '0xb',
-                },
-                {
-                    id: '3',
-                    depositIndex: 3,
-                    note: '0bff55555955',
-                    nullifierHex: '0x3',
-                    pair: { amount: '1', currency: KnownCurrencies.ETH },
-                    status: DepositStatus.CONFIRMED,
-                    timestamp: new Date().getTime(),
-                    spent: false,
-                    depositAddress: '0xc',
-                },
-            ];
-
-            deposits.forEach(
-                async (d) =>
-                    await tornadoService['addPendingWithdrawal'](d, '', 18, '')
-            );
-
-            let pendingWithdrawals = tornadoService[
-                '_pendingWithdrawalsStore'
-            ].store.getState().goerli.pending;
-
-            pendingWithdrawals.forEach((p) =>
-                expect(p.status).to.be.equal(
-                    PendingWithdrawalStatus.UNSUBMITTED
-                )
-            );
-
-            // Drop all UNSUBMITTED
-            await tornadoService['dropUnsubmittedWithdrawals']();
-
-            pendingWithdrawals = tornadoService[
-                '_pendingWithdrawalsStore'
-            ].store.getState().goerli.pending;
-
-            pendingWithdrawals.forEach((p) =>
-                expect(p.status).to.be.equal(PendingWithdrawalStatus.FAILED)
-            );
-        });
-
-        it('Should drop the failed deposit', async () => {
-            await tornadoService.unlock(testPass, mnemonic);
-            const deposits: IBlankDeposit[] = [
-                {
-                    id: '1',
-                    depositIndex: 1,
-                    note: '0abb21233921',
-                    nullifierHex: '0x1',
-                    pair: { amount: '1', currency: KnownCurrencies.ETH },
-                    status: DepositStatus.PENDING,
-                    timestamp: new Date().getTime(),
-                    spent: false,
-                    depositAddress: '0xa',
-                },
-                {
-                    id: '2',
-                    depositIndex: 2,
-                    note: '0cdd35333935',
-                    nullifierHex: '0x2',
-                    pair: { amount: '1', currency: KnownCurrencies.ETH },
-                    status: DepositStatus.FAILED,
-                    timestamp: new Date().getTime(),
-                    spent: false,
-                    depositAddress: '0xb',
-                },
-            ];
-
-            await tornadoService['addDeposits'](deposits);
-            let vaultDeposits = await tornadoService.getDeposits();
-            expect(vaultDeposits.length).to.be.equal(2);
-
-            await tornadoService['dropFailedDeposit']('2');
-            vaultDeposits = await tornadoService.getDeposits();
-
-            expect(vaultDeposits.length).to.be.equal(1);
-            expect(vaultDeposits[0].id).to.be.equal('1');
-        });
-
-        it.skip('Should fetch the tornado Deposit events correctly and store them in the events store', async () => {
-            const { mockedProvider } = mockNetworkController();
-            mockedProvider.getBlockNumber.callsFake(() => Promise.resolve(16));
-
-            let storedDeposits = await (tornadoService as any)._tornadoEventsDb.getAllEvents(
-                TornadoEvents.DEPOSIT,
-                'goerli',
-                {
-                    currency: KnownCurrencies.ETH,
-                    amount: '1',
-                } as CurrencyAmountPair
-            );
-
-            expect(storedDeposits.length).to.be.equal(0);
-
-            // Query deposits once
-            await (tornadoService as any).updateTornadoEvents(
-                TornadoEvents.DEPOSIT,
-                {
-                    currency: KnownCurrencies.ETH,
-                    amount: '1',
-                } as CurrencyAmountPair,
-                mockedContract
-            );
-
-            storedDeposits = await (tornadoService as any)._tornadoEventsDb.getAllEvents(
-                TornadoEvents.DEPOSIT,
-                'goerli',
-                {
-                    currency: KnownCurrencies.ETH,
-                    amount: '1',
-                } as CurrencyAmountPair
-            );
-
-            expect(storedDeposits.length).to.be.equal(16);
-
-            const lastQueriedBlock = await (tornadoService as any)._tornadoEventsDb.getLastQueriedBlock(
-                TornadoEvents.DEPOSIT,
-                'goerli',
-                {
-                    currency: KnownCurrencies.ETH,
-                    amount: '1',
-                } as CurrencyAmountPair
-            );
-            expect(lastQueriedBlock).to.be.equal(16);
-        });
-        it.skip('Should fetch the tornado Withdrawal events correctly and store them in the events store', async () => {
-            const { mockedProvider } = mockNetworkController();
-            mockedProvider.getBlockNumber.callsFake(() => Promise.resolve(15));
-
-            let storedWithdrawalsEvents = await (tornadoService as any)._tornadoEventsDb.getAllEvents(
-                TornadoEvents.WITHDRAWAL,
-                'goerli',
-                {
-                    currency: KnownCurrencies.ETH,
-                    amount: '1',
-                } as CurrencyAmountPair
-            );
-
-            expect(storedWithdrawalsEvents.length).to.be.equal(0);
-
-            // Query withdrawals events once
-            await (tornadoService as any).updateTornadoEvents(
-                TornadoEvents.WITHDRAWAL,
-                {
-                    currency: KnownCurrencies.ETH,
-                    amount: '1',
-                } as CurrencyAmountPair,
-                mockedContract
-            );
-
-            storedWithdrawalsEvents = await (tornadoService as any)._tornadoEventsDb.getAllEvents(
-                TornadoEvents.WITHDRAWAL,
-                'goerli',
-                {
-                    currency: KnownCurrencies.ETH,
-                    amount: '1',
-                } as CurrencyAmountPair
-            );
-
-            expect(storedWithdrawalsEvents.length).to.be.equal(15);
-
-            const lastQueriedBlock = await (tornadoService as any)._tornadoEventsDb.getLastQueriedBlock(
-                TornadoEvents.WITHDRAWAL,
-                'goerli',
-                {
-                    currency: KnownCurrencies.ETH,
-                    amount: '1',
-                } as CurrencyAmountPair
-            );
-            expect(lastQueriedBlock).to.be.equal(15);
-        });
-
-        it.skip('Should process a "More than 10k results" error correctly and paginate logs', async () => {
-            const { mockedProvider } = mockNetworkController();
-            mockedProvider.getBlockNumber.callsFake(() => Promise.resolve(16));
-
-            sinon
-                .stub(mockedContract, 'queryFilter')
-                .onCall(0)
-                .throws({ body: JSON.stringify({ error: { code: -32005 } }) })
-                .onCall(1)
-                .returns(DepositEventsMock.events.slice(0, 8))
-                .onCall(2)
-                .returns(DepositEventsMock.events.slice(8, 16));
-
-            let storedDepositsEvents = await (tornadoService as any)._tornadoEventsDb.getAllEvents(
-                TornadoEvents.DEPOSIT,
-                'goerli',
-                {
-                    currency: KnownCurrencies.ETH,
-                    amount: '1',
-                } as CurrencyAmountPair
-            );
-
-            expect(storedDepositsEvents.length).to.be.equal(0);
-
-            // Query deposits once
-            await (tornadoService as any).updateTornadoEvents(
-                TornadoEvents.DEPOSIT,
-                {
-                    currency: KnownCurrencies.ETH,
-                    amount: '1',
-                } as CurrencyAmountPair,
-                mockedContract
-            );
-
-            storedDepositsEvents = await (tornadoService as any)._tornadoEventsDb.getAllEvents(
-                TornadoEvents.DEPOSIT,
-                'goerli',
-                {
-                    currency: KnownCurrencies.ETH,
-                    amount: '1',
-                } as CurrencyAmountPair
-            );
-
-            expect(storedDepositsEvents.length).to.be.equal(16);
-
-            const lastQueriedBlock = await (tornadoService as any)._tornadoEventsDb.getLastQueriedBlock(
-                TornadoEvents.DEPOSIT,
-                'goerli',
-                {
-                    currency: KnownCurrencies.ETH,
-                    amount: '1',
-                } as CurrencyAmountPair
-            );
-            expect(lastQueriedBlock).to.be.equal(16);
-        });
-
-        it('Should initialize the vault correctly', async () => {
-            await tornadoService.unlock(testPass, mnemonic);
-            const deposits = await tornadoService.getDeposits();
-            expect(deposits.length).to.be.equals(0);
-        });
-
-        it('Should throw trying to get deposits because vault not unlocked', async () => {
-            let err;
-            try {
-                await tornadoService.getDeposits();
-            } catch (error) {
-                err = error;
             }
-            expect(err)
-                .to.be.an('error')
-                .with.property('message', 'Vault locked');
+        );
+
+        accountTrackerController = new AccountTrackerController(
+            mockKeyringController,
+            networkController,
+            tokenController,
+            tokenOperationsController,
+            preferencesController
+        );
+
+        incomingTransactionController = new IncomingTransactionController(
+            networkController,
+            preferencesController,
+            accountTrackerController,
+            { incomingTransactions: {} }
+        );
+
+        transactionController = new TransactionController(
+            networkController,
+            preferencesController,
+            permissionsController,
+            gasPricesController,
+            {
+                transactions: [],
+            },
+            async (ethTx: TypedTransaction) => {
+                const privateKey = Buffer.from(accounts.goerli[0].key, 'hex');
+                return Promise.resolve(ethTx.sign(privateKey));
+            },
+            { txHistoryLimit: 40 }
+        );
+
+        blockUpdatesController = new BlockUpdatesController(
+            networkController,
+            accountTrackerController,
+            gasPricesController,
+            exchangeRatesController,
+            incomingTransactionController,
+            transactionController,
+            { blockData: {} }
+        );
+
+        tornadoEventsService = new TornadoEventsService({
+            endpoint: 'http://localhost:8080',
+            version: 'v1',
+            blockUpdatesController,
         });
 
-        it('Should add and wait for confirmation a deposit for 100 DAI correctly', async () => {
-            sinon
-                .stub(transactionController, 'waitForTransactionResult')
-                .returns(
-                    new Promise((resolve) => {
-                        resolve('0x1822912');
-                    })
-                );
-
-            sinon
-                .stub(transactionController, 'approveTransaction')
-                .callsFake(() => new Promise((resolve) => resolve()));
-
-            sinon
-                .stub(networkController, 'getEIP1559Compatibility')
-                .callsFake(() => new Promise((resolve) => resolve(false)));
-
-            sinon
-                .stub(TornadoNotesService.prototype, 'getNextFreeDeposit')
-                .returns(
-                    new Promise((resolve) => {
-                        resolve({
-                            nextDeposit: {
-                                deposit: {
-                                    commitmentHex:
-                                        '0x18e19b6277a82d73bfcd2588102fbf2e20738c4253e3d6afbcae6ddd39a5e6f8',
-                                    preImage: Buffer.from(
-                                        '0000123982190139081928398132',
-                                        'hex'
-                                    ),
-                                } as any,
-                                pair: {
-                                    amount: '100',
-                                    currency: KnownCurrencies.DAI,
-                                },
-                            },
-                            increment: () => 0,
-                        });
-                    })
-                );
-
-            sinon
-                .stub(TokenOperationsController.prototype, 'allowance')
-                .returns(Promise.resolve(BigNumber.from(0)));
-
-            sinon
-                .stub(ApproveTransaction.prototype, 'do')
-                .returns(Promise.resolve(true));
-
-            await tornadoService.unlock(testPass, mnemonic);
-            await tornadoService.deposit(
-                {
-                    currency: KnownCurrencies.DAI,
-                    amount: '100',
+        tornadoService = new TornadoService({
+            networkController,
+            preferencesController,
+            tokenOperationsController,
+            tornadoEventsDB,
+            transactionController:
+                transactionController as unknown as TransactionController,
+            gasPricesController,
+            tokenController,
+            encryptor: mockEncryptor,
+            initialState: {
+                pendingWithdrawals: {
+                    mainnet: { pending: [] },
+                    goerli: { pending: [] },
                 },
-                {
-                    gasPrice: BigNumber.from('1000000000'),
+                vaultState: { vault: '' },
+            },
+            tornadoEventsService,
+        });
+        await (tornadoService as any).initDepositsIndexedDb();
+
+        tornadoService['_notesService']['workerRunner'] = {
+            run: async ({ name, data }: { name: string; data: string }) => {
+                if (name === 'pedersenHash') {
+                    return babyJub.unpackPoint(
+                        pedersenHash.hash(Buffer.from(data, 'hex'))
+                    )[0];
                 }
-            );
+            },
+        } as any;
 
-            let deposits = await tornadoService.getDeposits();
+        await tornadoService.initializeVault(testPass);
+    });
 
-            expect(deposits.length).to.be.equals(1);
-            expect(deposits[0].pair.currency).to.be.equals(KnownCurrencies.DAI);
-            expect(deposits[0].pair.amount).to.be.equals('100');
-            expect(deposits[0].note).to.be.equals(
-                '0000123982190139081928398132'
-            );
-            expect(deposits[0].spent).to.be.equals(false);
-            expect(deposits[0].status).to.be.equals(DepositStatus.CONFIRMED);
-        }).timeout(20000);
+    afterEach(() => {
+        sinon.restore();
+    });
 
-        it('Should add and wait for confirmation a deposit for 1 eth correctly', async () => {
-            sinon
-                .stub(transactionController, 'waitForTransactionResult')
-                .returns(
-                    new Promise((resolve) => {
-                        resolve('0x1822912');
-                    })
-                );
-
-            sinon
-                .stub(transactionController, 'approveTransaction')
-                .callsFake(() => new Promise((resolve) => resolve()));
-
-            sinon
-                .stub(networkController, 'getEIP1559Compatibility')
-                .callsFake(() => new Promise((resolve) => resolve(false)));
-
-            sinon
-                .stub(TornadoNotesService.prototype, 'getNextFreeDeposit')
-                .returns(
-                    new Promise((resolve) => {
-                        resolve({
-                            nextDeposit: {
-                                deposit: {
-                                    commitmentHex:
-                                        '0x18e19b6277a82d73bfcd2588102fbf2e20738c4253e3d6afbcae6ddd39a5e6f8',
-                                    preImage: Buffer.from(
-                                        '0000123982190139081928398132',
-                                        'hex'
-                                    ),
-                                } as any,
-                                pair: {
-                                    amount: '1',
-                                    currency: KnownCurrencies.ETH,
-                                },
-                            },
-                            increment: () => 0,
-                        });
-                    })
-                );
-
-            await tornadoService.unlock(testPass, mnemonic);
-            await tornadoService.deposit(
-                {
-                    currency: KnownCurrencies.ETH,
-                    amount: '1',
+    it('Should calculate the fees and total values correctly for 1 ETH', async () => {
+        await tornadoService.unlock(testPass, mnemonic);
+        const { total, fee } = tornadoService.calculateFeeAndTotal(
+            { amount: '1', currency: KnownCurrencies.ETH },
+            0.3,
+            {
+                average: {
+                    gasPrice: BigNumber.from('97000000000'),
+                    maxFeePerGas: null,
+                    maxPriorityFeePerGas: null,
                 },
-                {
-                    gasPrice: BigNumber.from('1000000000'),
-                }
-            );
-
-            let deposits = await tornadoService.getDeposits();
-
-            expect(deposits.length).to.be.equals(1);
-            expect(deposits[0].note).to.be.equals(
-                '0000123982190139081928398132'
-            );
-            expect(deposits[0].spent).to.be.equals(false);
-            expect(deposits[0].status).to.be.equals(DepositStatus.CONFIRMED);
-        }).timeout(10000);
-
-        it('Should update pending deposits to its correspondent status correctly', async () => {
-            sinon
-                .stub(
-                    ethers.providers.StaticJsonRpcProvider.prototype,
-                    'network'
-                )
-                .returns({
-                    chainId: 5,
-                });
-
-            await tornadoService.unlock(testPass, mnemonic);
-            const deposits: IBlankDeposit[] = [
-                {
-                    id: '1',
-                    depositIndex: 1,
-                    note: '0abb21233921',
-                    nullifierHex: '0x1',
-                    pair: { amount: '1', currency: KnownCurrencies.ETH },
-                    status: DepositStatus.PENDING,
-                    timestamp: 1621286532764,
-                    spent: false,
-                    depositAddress: '0xa',
+                fast: {
+                    gasPrice: BigNumber.from('97000000000'),
+                    maxFeePerGas: null,
+                    maxPriorityFeePerGas: null,
                 },
-                {
-                    id: '2',
-                    depositIndex: 2,
-                    note: '0cdd35333935',
-                    nullifierHex: '0x2',
-                    pair: { amount: '1', currency: KnownCurrencies.ETH },
-                    status: DepositStatus.PENDING,
-                    timestamp: 1621286545673,
-                    spent: false,
-                    depositAddress: '0xb',
+                slow: {
+                    gasPrice: BigNumber.from('97000000000'),
+                    maxFeePerGas: null,
+                    maxPriorityFeePerGas: null,
                 },
-            ];
+            },
+            {
+                dai: '283482591704018',
+                cdai: '6066623185041',
+                usdc: '282800357455943',
+                usdt: '283794295053285',
+                wbtc: '16207614089077625466',
+            }
+        );
 
-            await tornadoService['addDeposits'](deposits);
+        expect(total.toString()).to.be.equal(utils.parseEther('1').toString());
+        expect(fee.toString()).to.be.equal('59017500000000000');
+    }).timeout(60000);
 
-            sinon
-                .stub(transactionController, 'getBlankDepositTransactions')
-                .returns([
+    it('Should calculate the fees and total values correctly for 100 DAI', async () => {
+        await tornadoService.unlock(testPass, mnemonic);
+        const { total, fee } = tornadoService.calculateFeeAndTotal(
+            { amount: '100', currency: KnownCurrencies.DAI },
+            0.3,
+            {
+                average: {
+                    gasPrice: BigNumber.from('97000000000'),
+                    maxFeePerGas: null,
+                    maxPriorityFeePerGas: null,
+                },
+                fast: {
+                    gasPrice: BigNumber.from('97000000000'),
+                    maxFeePerGas: null,
+                    maxPriorityFeePerGas: null,
+                },
+                slow: {
+                    gasPrice: BigNumber.from('97000000000'),
+                    maxFeePerGas: null,
+                    maxPriorityFeePerGas: null,
+                },
+            },
+            {
+                dai: '283482591704018',
+                cdai: '6066623185041',
+                usdc: '282800357455943',
+                usdt: '283794295053285',
+                wbtc: '16207614089077625466',
+            }
+        );
+
+        expect(total.toString()).to.be.equal(
+            utils.parseUnits('100', 18).toString()
+        );
+        expect(fee.toString()).to.be.equal('197904726495824626006');
+    }).timeout(60000);
+
+    it('Should drop the unsubmitted pending withdrawals and transition them to FAILED', async () => {
+        await tornadoService.unlock(testPass, mnemonic);
+        const deposits: IBlankDeposit[] = [
+            {
+                id: '1',
+                depositIndex: 1,
+                note: '0abb21233921',
+                nullifierHex: '0x1',
+                pair: { amount: '1', currency: KnownCurrencies.ETH },
+                status: DepositStatus.CONFIRMED,
+                timestamp: new Date().getTime(),
+                spent: false,
+                depositAddress: '0xa',
+            },
+            {
+                id: '2',
+                depositIndex: 2,
+                note: '0cdd35333935',
+                nullifierHex: '0x2',
+                pair: { amount: '1', currency: KnownCurrencies.ETH },
+                status: DepositStatus.CONFIRMED,
+                timestamp: new Date().getTime(),
+                spent: false,
+                depositAddress: '0xb',
+            },
+            {
+                id: '3',
+                depositIndex: 3,
+                note: '0bff55555955',
+                nullifierHex: '0x3',
+                pair: { amount: '1', currency: KnownCurrencies.ETH },
+                status: DepositStatus.CONFIRMED,
+                timestamp: new Date().getTime(),
+                spent: false,
+                depositAddress: '0xc',
+            },
+        ];
+
+        deposits.forEach(
+            async (d) =>
+                await tornadoService['addPendingWithdrawal'](d, '', 18, '')
+        );
+
+        let pendingWithdrawals =
+            tornadoService['_pendingWithdrawalsStore'].store.getState().goerli
+                .pending;
+
+        pendingWithdrawals.forEach((p) =>
+            expect(p.status).to.be.equal(PendingWithdrawalStatus.UNSUBMITTED)
+        );
+
+        // Drop all UNSUBMITTED
+        await tornadoService['dropUnsubmittedWithdrawals']();
+
+        pendingWithdrawals =
+            tornadoService['_pendingWithdrawalsStore'].store.getState().goerli
+                .pending;
+
+        pendingWithdrawals.forEach((p) =>
+            expect(p.status).to.be.equal(PendingWithdrawalStatus.FAILED)
+        );
+    }).timeout(60000);
+
+    it('Should drop the failed deposit', async () => {
+        await tornadoService.unlock(testPass, mnemonic);
+        const deposits: IBlankDeposit[] = [
+            {
+                id: '1',
+                depositIndex: 1,
+                note: '0abb21233921',
+                nullifierHex: '0x1',
+                pair: { amount: '1', currency: KnownCurrencies.ETH },
+                status: DepositStatus.PENDING,
+                timestamp: new Date().getTime(),
+                spent: false,
+                depositAddress: '0xa',
+            },
+            {
+                id: '2',
+                depositIndex: 2,
+                note: '0cdd35333935',
+                nullifierHex: '0x2',
+                pair: { amount: '1', currency: KnownCurrencies.ETH },
+                status: DepositStatus.FAILED,
+                timestamp: new Date().getTime(),
+                spent: false,
+                depositAddress: '0xb',
+            },
+        ];
+
+        await tornadoService['_blankDepositVault']['addDeposits'](deposits);
+        let vaultDeposits = await tornadoService.getDeposits();
+        expect(vaultDeposits.length).to.be.equal(2);
+
+        await tornadoService['_blankDepositVault']['dropFailedDeposit']('2');
+        vaultDeposits = await tornadoService.getDeposits();
+
+        expect(vaultDeposits.length).to.be.equal(1);
+        expect(vaultDeposits[0].id).to.be.equal('1');
+    }).timeout(60000);
+
+    it('Should fetch the tornado Deposit events correctly and store them in the events store', async () => {
+        sinon.stub(tornadoEventsService, 'getDeposits').returns(
+            new Promise<Deposit[]>((resolve) => {
+                resolve([
                     {
-                        id: '1',
-                        blankDepositId: '1',
-                        status: TransactionStatus.CONFIRMED,
-                        chainId: 5,
-                    } as TransactionMeta,
+                        blockNumber: 1,
+                        commitment: 'c',
+                        leafIndex: 1,
+                        timestamp: '1',
+                        transactionHash: 't',
+                    },
                     {
-                        id: '2',
-                        blankDepositId: '2',
-                        status: TransactionStatus.FAILED,
-                        chainId: 5,
-                    } as TransactionMeta,
+                        blockNumber: 2,
+                        commitment: 'c',
+                        leafIndex: 2,
+                        timestamp: '1',
+                        transactionHash: 't',
+                    },
                 ]);
+            })
+        );
 
-            sinon.stub(transactionController, 'waitForTransactionResult');
+        let storedDeposits = await (
+            tornadoService as any
+        )._tornadoEventsDb.getAllEvents(TornadoEvents.DEPOSIT, 'goerli', {
+            currency: KnownCurrencies.ETH,
+            amount: '1',
+        } as CurrencyAmountPair);
 
-            await tornadoService['checkCurrentNetworkPendingDeposits']();
+        expect(storedDeposits.length).to.be.equal(0);
 
-            const updatedDeposits = (await tornadoService.getDeposits()).sort(
-                (a, b) => a.timestamp - b.timestamp
-            );
-            expect(updatedDeposits.length).to.be.equal(2);
-            expect(updatedDeposits[0].status).to.be.equal(
-                DepositStatus.CONFIRMED
-            );
-            expect(updatedDeposits[1].status).to.be.equal(DepositStatus.FAILED);
-        });
+        // Query deposits once
+        await (tornadoService as any).updateTornadoEvents(
+            TornadoEvents.DEPOSIT,
+            {
+                currency: KnownCurrencies.ETH,
+                amount: '1',
+            } as CurrencyAmountPair,
+            mockedContract
+        );
 
-        it('Should process submitted but non confirmed deposits correctly', async () => {
-            sinon
-                .stub(
-                    ethers.providers.StaticJsonRpcProvider.prototype,
-                    'network'
-                )
-                .get(() => ({
-                    chainId: 5,
-                }));
+        storedDeposits = await (
+            tornadoService as any
+        )._tornadoEventsDb.getAllEvents(TornadoEvents.DEPOSIT, 'goerli', {
+            currency: KnownCurrencies.ETH,
+            amount: '1',
+        } as CurrencyAmountPair);
 
-            await tornadoService.unlock(testPass, mnemonic);
-            const deposits: IBlankDeposit[] = [
-                {
-                    id: '1',
-                    depositIndex: 1,
-                    note: '0abb21233921',
-                    nullifierHex: '0x1',
-                    pair: { amount: '1', currency: KnownCurrencies.ETH },
-                    status: DepositStatus.PENDING,
-                    timestamp: 1621286532764,
-                    spent: false,
-                    depositAddress: '0xa',
-                    chainId: 5,
-                },
-                {
-                    id: '2',
-                    depositIndex: 2,
-                    note: '0cdd35333935',
-                    nullifierHex: '0x2',
-                    pair: { amount: '1', currency: KnownCurrencies.ETH },
-                    status: DepositStatus.PENDING,
-                    timestamp: 1621286545673,
-                    spent: false,
-                    depositAddress: '0xb',
-                    chainId: 5,
-                },
-            ];
+        expect(storedDeposits.length).to.be.equal(2);
 
-            await tornadoService['addDeposits'](deposits);
+        const lastQueriedBlock = await (
+            tornadoService as any
+        )._tornadoEventsDb.getLastQueriedBlock(
+            TornadoEvents.DEPOSIT,
+            'goerli',
+            {
+                currency: KnownCurrencies.ETH,
+                amount: '1',
+            } as CurrencyAmountPair
+        );
+        expect(lastQueriedBlock).to.be.equal(2);
+    }).timeout(60000);
 
-            const metas = [
+    it('Should fetch the tornado Withdrawal events correctly and store them in the events store', async () => {
+        sinon.stub(tornadoEventsService, 'getWithdrawals').returns(
+            new Promise<Withdrawal[]>((resolve) => {
+                resolve([
+                    {
+                        blockNumber: 1,
+                        fee: ethers.constants.Zero,
+                        nullifierHex: 'n1',
+                        to: 't1',
+                        transactionHash: 'h1',
+                    },
+                    {
+                        blockNumber: 2,
+                        fee: ethers.constants.Zero,
+                        nullifierHex: 'n2',
+                        to: 't2',
+                        transactionHash: 'h2',
+                    },
+                    {
+                        blockNumber: 3,
+                        fee: ethers.constants.Zero,
+                        nullifierHex: 'n3',
+                        to: 't3',
+                        transactionHash: 'h3',
+                    },
+                ]);
+            })
+        );
+
+        let storedWithdrawalsEvents = await (
+            tornadoService as any
+        )._tornadoEventsDb.getAllEvents(TornadoEvents.WITHDRAWAL, 'goerli', {
+            currency: KnownCurrencies.ETH,
+            amount: '1',
+        } as CurrencyAmountPair);
+
+        expect(storedWithdrawalsEvents.length).to.be.equal(0);
+
+        // Query withdrawals events once
+        await (tornadoService as any).updateTornadoEvents(
+            TornadoEvents.WITHDRAWAL,
+            {
+                currency: KnownCurrencies.ETH,
+                amount: '1',
+            } as CurrencyAmountPair,
+            mockedContract
+        );
+
+        storedWithdrawalsEvents = await (
+            tornadoService as any
+        )._tornadoEventsDb.getAllEvents(TornadoEvents.WITHDRAWAL, 'goerli', {
+            currency: KnownCurrencies.ETH,
+            amount: '1',
+        } as CurrencyAmountPair);
+
+        expect(storedWithdrawalsEvents.length).to.be.equal(3);
+
+        const lastQueriedBlock = await (
+            tornadoService as any
+        )._tornadoEventsDb.getLastQueriedBlock(
+            TornadoEvents.WITHDRAWAL,
+            'goerli',
+            {
+                currency: KnownCurrencies.ETH,
+                amount: '1',
+            } as CurrencyAmountPair
+        );
+        expect(lastQueriedBlock).to.be.equal(3);
+    }).timeout(60000);
+
+    it('Should initialize the vault correctly', async () => {
+        await tornadoService.unlock(testPass, mnemonic);
+        const deposits = await tornadoService.getDeposits();
+        expect(deposits.length).to.be.equals(0);
+    }).timeout(60000);
+
+    it('Should throw trying to get deposits because vault not unlocked', async () => {
+        let err;
+        try {
+            await tornadoService.getDeposits();
+        } catch (error) {
+            err = error;
+        }
+        expect(err).to.be.an('error').with.property('message', 'Vault locked');
+    }).timeout(60000);
+
+    it('Should add and wait for confirmation a deposit for 100 DAI correctly', async () => {
+        sinon.stub(transactionController, 'waitForTransactionResult').returns(
+            new Promise((resolve) => {
+                resolve('0x1822912');
+            })
+        );
+
+        sinon
+            .stub(transactionController, 'approveTransaction')
+            .callsFake(() => new Promise((resolve) => resolve()));
+
+        sinon
+            .stub(networkController, 'getEIP1559Compatibility')
+            .callsFake(() => new Promise((resolve) => resolve(false)));
+
+        sinon.stub(TornadoNotesService.prototype, 'getNextFreeDeposit').returns(
+            new Promise((resolve) => {
+                resolve({
+                    nextDeposit: {
+                        deposit: {
+                            commitmentHex:
+                                '0x18e19b6277a82d73bfcd2588102fbf2e20738c4253e3d6afbcae6ddd39a5e6f8',
+                            preImage: Buffer.from(
+                                '0000123982190139081928398132',
+                                'hex'
+                            ),
+                        } as any,
+                        pair: {
+                            amount: '100',
+                            currency: KnownCurrencies.DAI,
+                        },
+                    },
+                });
+            })
+        );
+
+        sinon
+            .stub(TokenOperationsController.prototype, 'allowance')
+            .returns(Promise.resolve(BigNumber.from(0)));
+
+        sinon
+            .stub(ApproveTransaction.prototype, 'do')
+            .returns(Promise.resolve(true));
+
+        await tornadoService.unlock(testPass, mnemonic);
+        await tornadoService.deposit(
+            {
+                currency: KnownCurrencies.DAI,
+                amount: '100',
+            },
+            {
+                gasPrice: BigNumber.from('1000000000'),
+            }
+        );
+
+        let deposits = await tornadoService.getDeposits();
+
+        expect(deposits.length).to.be.equals(1);
+        expect(deposits[0].pair.currency).to.be.equals(KnownCurrencies.DAI);
+        expect(deposits[0].pair.amount).to.be.equals('100');
+        expect(deposits[0].note).to.be.equals('0000123982190139081928398132');
+        expect(deposits[0].spent).to.be.equals(false);
+        expect(deposits[0].status).to.be.equals(DepositStatus.CONFIRMED);
+    }).timeout(60000);
+
+    it('Should add and wait for confirmation a deposit for 1 eth correctly', async () => {
+        sinon.stub(transactionController, 'waitForTransactionResult').returns(
+            new Promise((resolve) => {
+                resolve('0x1822912');
+            })
+        );
+
+        sinon
+            .stub(transactionController, 'approveTransaction')
+            .callsFake(() => new Promise((resolve) => resolve()));
+
+        sinon
+            .stub(networkController, 'getEIP1559Compatibility')
+            .callsFake(() => new Promise((resolve) => resolve(false)));
+
+        sinon.stub(TornadoNotesService.prototype, 'getNextFreeDeposit').returns(
+            new Promise((resolve) => {
+                resolve({
+                    nextDeposit: {
+                        deposit: {
+                            commitmentHex:
+                                '0x18e19b6277a82d73bfcd2588102fbf2e20738c4253e3d6afbcae6ddd39a5e6f8',
+                            preImage: Buffer.from(
+                                '0000123982190139081928398132',
+                                'hex'
+                            ),
+                        } as any,
+                        pair: {
+                            amount: '1',
+                            currency: KnownCurrencies.ETH,
+                        },
+                    },
+                });
+            })
+        );
+
+        await tornadoService.unlock(testPass, mnemonic);
+        await tornadoService.deposit(
+            {
+                currency: KnownCurrencies.ETH,
+                amount: '1',
+            },
+            {
+                gasPrice: BigNumber.from('1000000000'),
+            }
+        );
+
+        let deposits = await tornadoService.getDeposits();
+
+        expect(deposits.length).to.be.equals(1);
+        expect(deposits[0].note).to.be.equals('0000123982190139081928398132');
+        expect(deposits[0].spent).to.be.equals(false);
+        expect(deposits[0].status).to.be.equals(DepositStatus.CONFIRMED);
+    }).timeout(60000);
+
+    it('Should update pending deposits to its correspondent status correctly', async () => {
+        sinon
+            .stub(ethers.providers.StaticJsonRpcProvider.prototype, 'network')
+            .returns({
+                chainId: 5,
+            });
+
+        await tornadoService.unlock(testPass, mnemonic);
+        const deposits: IBlankDeposit[] = [
+            {
+                id: '1',
+                depositIndex: 1,
+                note: '0abb21233921',
+                nullifierHex: '0x1',
+                pair: { amount: '1', currency: KnownCurrencies.ETH },
+                status: DepositStatus.PENDING,
+                timestamp: 1621286532764,
+                spent: false,
+                depositAddress: '0xa',
+            },
+            {
+                id: '2',
+                depositIndex: 2,
+                note: '0cdd35333935',
+                nullifierHex: '0x2',
+                pair: { amount: '1', currency: KnownCurrencies.ETH },
+                status: DepositStatus.PENDING,
+                timestamp: 1621286545673,
+                spent: false,
+                depositAddress: '0xb',
+            },
+        ];
+
+        await tornadoService['_blankDepositVault']['addDeposits'](deposits);
+
+        sinon
+            .stub(transactionController, 'getBlankDepositTransactions')
+            .returns([
                 {
                     id: '1',
                     blankDepositId: '1',
-                    status: TransactionStatus.SUBMITTED,
+                    status: TransactionStatus.CONFIRMED,
                     chainId: 5,
                 } as TransactionMeta,
                 {
                     id: '2',
                     blankDepositId: '2',
-                    status: TransactionStatus.SUBMITTED,
+                    status: TransactionStatus.FAILED,
                     chainId: 5,
                 } as TransactionMeta,
-            ];
+            ]);
 
-            sinon
-                .stub(transactionController, 'waitForTransactionResult')
-                .onFirstCall()
-                .returns(
-                    new Promise((resolve) => {
-                        resolve('0x1822912');
-                    })
+        sinon.stub(transactionController, 'waitForTransactionResult');
+
+        await tornadoService['checkCurrentNetworkPendingDeposits']();
+
+        const updatedDeposits = (await tornadoService.getDeposits()).sort(
+            (a, b) => a.timestamp - b.timestamp
+        );
+        expect(updatedDeposits.length).to.be.equal(2);
+        expect(updatedDeposits[0].status).to.be.equal(DepositStatus.CONFIRMED);
+        expect(updatedDeposits[1].status).to.be.equal(DepositStatus.FAILED);
+    }).timeout(60000);
+
+    it('Should process submitted but non confirmed deposits correctly', async () => {
+        sinon
+            .stub(ethers.providers.StaticJsonRpcProvider.prototype, 'network')
+            .get(() => ({
+                chainId: 5,
+            }));
+
+        await tornadoService.unlock(testPass, mnemonic);
+        const deposits: IBlankDeposit[] = [
+            {
+                id: '1',
+                depositIndex: 1,
+                note: '0abb21233921',
+                nullifierHex: '0x1',
+                pair: { amount: '1', currency: KnownCurrencies.ETH },
+                status: DepositStatus.PENDING,
+                timestamp: 1621286532764,
+                spent: false,
+                depositAddress: '0xa',
+                chainId: 5,
+            },
+            {
+                id: '2',
+                depositIndex: 2,
+                note: '0cdd35333935',
+                nullifierHex: '0x2',
+                pair: { amount: '1', currency: KnownCurrencies.ETH },
+                status: DepositStatus.PENDING,
+                timestamp: 1621286545673,
+                spent: false,
+                depositAddress: '0xb',
+                chainId: 5,
+            },
+        ];
+
+        await tornadoService['_blankDepositVault']['addDeposits'](deposits);
+
+        const metas = [
+            {
+                id: '1',
+                blankDepositId: '1',
+                status: TransactionStatus.SUBMITTED,
+                chainId: 5,
+            } as TransactionMeta,
+            {
+                id: '2',
+                blankDepositId: '2',
+                status: TransactionStatus.SUBMITTED,
+                chainId: 5,
+            } as TransactionMeta,
+        ];
+
+        sinon
+            .stub(transactionController, 'waitForTransactionResult')
+            .onFirstCall()
+            .returns(
+                new Promise((resolve) => {
+                    resolve('0x1822912');
+                })
+            )
+            .onSecondCall()
+            .throws();
+
+        for (const meta of metas) {
+            await tornadoService['processPendingDeposit'](meta);
+        }
+
+        const updatedDeposits = (await tornadoService.getDeposits()).sort(
+            (a, b) => a.timestamp - b.timestamp
+        );
+        expect(updatedDeposits.length).to.be.equal(2);
+        expect(updatedDeposits[0].status).to.be.equal(DepositStatus.CONFIRMED);
+        expect(updatedDeposits[1].status).to.be.equal(DepositStatus.FAILED);
+    }).timeout(60000);
+
+    it('Should withdraw 1 eth correctly', async () => {
+        sinon
+            .stub(NetworkController.prototype, 'waitForTransaction')
+            .returns(new Promise((resolve) => resolve({} as any)));
+
+        sinon.stub(gasPricesController, 'getGasPricesLevels').returns({
+            slow: { gasPrice: BigNumber.from('1000000000') },
+            average: { gasPrice: BigNumber.from('2000000000') },
+            fast: { gasPrice: BigNumber.from('97000000000') },
+        } as GasPriceLevels);
+
+        sinon.stub(tornadoService as any, 'getRelayerStatus').returns(
+            new Promise((resolve) =>
+                resolve({
+                    ...TornadoRelayerMock.json(),
+                    relayerUrl: 'goerli-relayer.network',
+                    networkName: 'goerli',
+                    health: {
+                        status: true,
+                        error: '',
+                    },
+                })
+            )
+        );
+
+        sinon
+            .stub(TornadoNotesService.prototype, 'generateProof')
+            .returns(
+                new Promise((resolve) => resolve({ proof: '', args: [''] }))
+            );
+
+        global.fetch = sinon
+            .stub()
+            .returns(
+                new Promise((resolve) =>
+                    resolve(mockApiResponse({ id: '129308213' }))
                 )
-                .onSecondCall()
-                .throws();
-
-            for (const meta of metas) {
-                await tornadoService['processPendingDeposit'](meta);
-            }
-
-            const updatedDeposits = (await tornadoService.getDeposits()).sort(
-                (a, b) => a.timestamp - b.timestamp
             );
-            expect(updatedDeposits.length).to.be.equal(2);
-            expect(updatedDeposits[0].status).to.be.equal(
-                DepositStatus.CONFIRMED
+
+        sinon
+            .stub(tornadoService as any, 'checkPendingWithdrawal')
+            .returns(Promise.resolve());
+
+        sinon
+            .stub(TornadoService.prototype as any, 'getStatusFromRelayerJob')
+            .returns(
+                Promise.resolve({
+                    txHash: '0x289189',
+                    status: PendingWithdrawalStatus.CONFIRMED,
+                })
             );
-            expect(updatedDeposits[1].status).to.be.equal(DepositStatus.FAILED);
+
+        await tornadoService.unlock(testPass, mnemonic);
+
+        const deposit: IBlankDeposit = {
+            id: '12345678',
+            note: Buffer.alloc(62, 'f').toString('hex'),
+            nullifierHex:
+                '0x21315e4bfbfe7cff7a31e14546b96abdfacf2281cb938beddce4f89fc132ba60',
+            pair: { amount: '1', currency: KnownCurrencies.ETH },
+            timestamp: new Date().getTime(),
+            spent: false,
+            depositIndex: 0,
+            status: DepositStatus.CONFIRMED,
+            chainId: 5,
+        };
+
+        await (tornadoService as any)['_blankDepositVault'].addDeposits([
+            deposit,
+        ]);
+
+        let unspentCount = await tornadoService.getUnspentDepositCount({
+            currency: KnownCurrencies.ETH,
+            amount: '1',
         });
 
-        it('Should withdraw 1 eth correctly', async () => {
-            sinon
-                .stub(NetworkController.prototype, 'waitForTransaction')
-                .returns(new Promise((resolve) => resolve({} as any)));
+        expect(unspentCount).to.be.equal(1);
 
-            sinon.stub(gasPricesController, 'gasPrices').returns({
-                slow: { gasPrice: BigNumber.from('1000000000') },
-                average: { gasPrice: BigNumber.from('2000000000') },
-                fast: { gasPrice: BigNumber.from('97000000000') },
-            } as GasPriceLevels);
+        await tornadoService.withdraw(
+            deposit,
+            preferencesController.getSelectedAddress()
+        );
 
-            sinon.stub(tornadoService as any, 'getRelayerStatus').returns(
-                new Promise((resolve) =>
-                    resolve({
-                        ...TornadoRelayerMock.json(),
-                        relayerUrl: 'goerli-relayer.network',
-                        networkName: 'goerli',
-                        health: {
-                            status: true,
-                            error: '',
-                        },
-                    })
-                )
-            );
-
-            sinon
-                .stub(TornadoNotesService.prototype, 'generateProof')
-                .returns(
-                    new Promise((resolve) => resolve({ proof: '', args: [''] }))
-                );
-
-            global.fetch = sinon
-                .stub()
-                .returns(
-                    new Promise((resolve) =>
-                        resolve(mockApiResponse({ id: '129308213' }))
-                    )
-                );
-
-            sinon
-                .stub(tornadoService as any, 'checkPendingWithdrawal')
-                .returns(Promise.resolve());
-
-            sinon
-                .stub(
-                    TornadoService.prototype as any,
-                    'getStatusFromRelayerJob'
-                )
-                .returns(
-                    Promise.resolve({
-                        txHash: '0x289189',
-                        status: PendingWithdrawalStatus.CONFIRMED,
-                    })
-                );
-
-            await tornadoService.unlock(testPass, mnemonic);
-
-            const deposit: IBlankDeposit = {
-                id: '12345678',
-                note: Buffer.alloc(62, 'f').toString('hex'),
-                nullifierHex:
-                    '0x21315e4bfbfe7cff7a31e14546b96abdfacf2281cb938beddce4f89fc132ba60',
-                pair: { amount: '1', currency: KnownCurrencies.ETH },
-                timestamp: new Date().getTime(),
-                spent: false,
-                depositIndex: 0,
-                status: DepositStatus.CONFIRMED,
-                chainId: 5,
-            };
-
-            await (tornadoService as any).addDeposits([deposit]);
-
-            let unspentCount = await tornadoService.getUnspentDepositCount({
-                currency: KnownCurrencies.ETH,
-                amount: '1',
-            });
-
-            expect(unspentCount).to.be.equal(1);
-
-            await tornadoService.withdraw(
-                deposit,
-                preferencesController.getSelectedAddress()
-            );
-
-            let pendingWithdrawals = tornadoService[
-                '_pendingWithdrawalsStore'
-            ].store.getState()[AvailableNetworks.GOERLI];
-
-            expect(pendingWithdrawals.pending[0].depositId).to.be.equal(
-                '12345678'
-            );
-            expect(pendingWithdrawals.pending[0].status).to.be.equal(
-                PendingWithdrawalStatus.UNSUBMITTED
-            );
-
-            const parsedDeposit = await tornadoService[
-                '_notesService'
-            ].parseDeposit(deposit.note);
-            await tornadoService['processWithdrawal'](
-                deposit,
-                parsedDeposit,
-                'goerli-relayer.network',
-                preferencesController.getSelectedAddress(),
-                '0x7542Be8193A34b984903A92e36e8c6F5a4A63c17',
-                BigNumber.from('53925000000000000'),
-                pendingWithdrawals.pending[0]
-            );
-
-            pendingWithdrawals = tornadoService[
-                '_pendingWithdrawalsStore'
-            ].store.getState()[AvailableNetworks.GOERLI];
-
-            expect(pendingWithdrawals.pending[0].depositId).to.be.equal(
-                '12345678'
-            );
-            expect(pendingWithdrawals.pending[0].jobId).to.be.equal(
-                '129308213'
-            );
-            expect(pendingWithdrawals.pending[0].status).to.be.equal(
-                PendingWithdrawalStatus.PENDING
-            );
-        }).timeout(18000);
-
-        it('Should update the state of a pending deposit withdrawal and transition it to spent', async () => {
-            sinon
-                .stub(
-                    TornadoService.prototype as any,
-                    'getStatusFromRelayerJob'
-                )
-                .returns(
-                    Promise.resolve({
-                        txHash: '0x289189',
-                        status: PendingWithdrawalStatus.CONFIRMED,
-                    })
-                );
-            sinon
-                .stub(
-                    TornadoService.prototype as any,
-                    'waitForTransactionReceipt'
-                )
-                .returns(Promise.resolve());
-
-            // Unlock vault
-            await tornadoService.unlock(testPass, mnemonic);
-
-            const deposit: IBlankDeposit = {
-                id: '12345678',
-                note: Buffer.alloc(62, 'f').toString('hex'),
-                nullifierHex:
-                    '0x21315e4bfbfe7cff7a31e14546b96abdfacf2281cb938beddce4f89fc132ba60',
-                pair: { amount: '1', currency: KnownCurrencies.ETH },
-                timestamp: new Date().getTime(),
-                spent: false,
-                depositIndex: 0,
-                status: DepositStatus.CONFIRMED,
-                chainId: 5,
-            };
-
-            // Add deposit
-            await (tornadoService as any).addDeposits([deposit]);
-
-            let unspentCount = await tornadoService.getUnspentDepositCount({
-                currency: KnownCurrencies.ETH,
-                amount: '1',
-            });
-
-            expect(unspentCount).to.be.equal(1);
-
-            // Add to pending withdrawal
-            let pending = await tornadoService['addPendingWithdrawal'](
-                deposit,
-                '0xabc',
-                18,
-                'goerli.goblank.io'
-            );
-            pending.chainId = 5;
-
-            expect(pending.status).to.be.equal(
-                PendingWithdrawalStatus.UNSUBMITTED
-            );
-
-            await tornadoService['updatePendingWithdrawal'](pending.pendingId, {
-                status: PendingWithdrawalStatus.PENDING,
-                chainId: 5,
-            });
-
-            let pendingWithdrawals = tornadoService[
-                '_pendingWithdrawalsStore'
-            ].store.getState()[AvailableNetworks.GOERLI];
-
-            pending = pendingWithdrawals.pending[0];
-            pending.chainId = 5;
-
-            // Check for it
-            await tornadoService['checkPendingWithdrawal'](pending);
-
-            pendingWithdrawals = (tornadoService as any)._pendingWithdrawalsStore.store.getState()[
+        let pendingWithdrawals =
+            tornadoService['_pendingWithdrawalsStore'].store.getState()[
                 AvailableNetworks.GOERLI
             ];
 
-            expect(pendingWithdrawals.pending[0].status).to.be.equals(
-                PendingWithdrawalStatus.CONFIRMED
+        expect(pendingWithdrawals.pending[0].depositId).to.be.equal('12345678');
+        expect(pendingWithdrawals.pending[0].status).to.be.equal(
+            PendingWithdrawalStatus.UNSUBMITTED
+        );
+
+        const parsedDeposit = await tornadoService[
+            '_notesService'
+        ].parseDeposit(deposit.note);
+        await tornadoService['processWithdrawal'](
+            deposit,
+            parsedDeposit,
+            'goerli-relayer.network',
+            preferencesController.getSelectedAddress(),
+            '0x7542Be8193A34b984903A92e36e8c6F5a4A63c17',
+            BigNumber.from('53925000000000000'),
+            pendingWithdrawals.pending[0]
+        );
+
+        pendingWithdrawals =
+            tornadoService['_pendingWithdrawalsStore'].store.getState()[
+                AvailableNetworks.GOERLI
+            ];
+
+        expect(pendingWithdrawals.pending[0].depositId).to.be.equal('12345678');
+        expect(pendingWithdrawals.pending[0].jobId).to.be.equal('129308213');
+        expect(pendingWithdrawals.pending[0].status).to.be.equal(
+            PendingWithdrawalStatus.PENDING
+        );
+    }).timeout(60000);
+
+    it('Should update the state of a pending deposit withdrawal and transition it to spent', async () => {
+        sinon
+            .stub(TornadoService.prototype as any, 'getStatusFromRelayerJob')
+            .returns(
+                Promise.resolve({
+                    txHash: '0x289189',
+                    status: PendingWithdrawalStatus.CONFIRMED,
+                })
             );
+        sinon
+            .stub(TornadoService.prototype as any, 'waitForTransactionReceipt')
+            .returns(Promise.resolve());
 
-            unspentCount = await tornadoService.getUnspentDepositCount({
-                currency: KnownCurrencies.ETH,
-                amount: '1',
-            });
+        // Unlock vault
+        await tornadoService.unlock(testPass, mnemonic);
 
-            expect(unspentCount).to.be.equal(0);
+        const deposit: IBlankDeposit = {
+            id: '12345678',
+            note: Buffer.alloc(62, 'f').toString('hex'),
+            nullifierHex:
+                '0x21315e4bfbfe7cff7a31e14546b96abdfacf2281cb938beddce4f89fc132ba60',
+            pair: { amount: '1', currency: KnownCurrencies.ETH },
+            timestamp: new Date().getTime(),
+            spent: false,
+            depositIndex: 0,
+            status: DepositStatus.CONFIRMED,
+            chainId: 5,
+        };
+
+        // Add deposit
+        await (tornadoService as any)['_blankDepositVault'].addDeposits([
+            deposit,
+        ]);
+
+        let unspentCount = await tornadoService.getUnspentDepositCount({
+            currency: KnownCurrencies.ETH,
+            amount: '1',
         });
 
-        it('Should update spent notes state', async () => {
-            sinon
-                .stub(tornadoService['_notesService'], 'updateTornadoEvents')
-                .callsFake(
-                    async (
-                        type: TornadoEvents,
-                        currencyAmountPair: CurrencyAmountPair
-                    ) => {
-                        const events =
-                            type === TornadoEvents.DEPOSIT
-                                ? {
-                                      type,
-                                      events: DepositEventsMock.events.map(
-                                          (e) => ({
-                                              blockNumber: e.blockNumber,
-                                              transactionHash:
-                                                  e.transactionHash,
-                                              ...e.args,
-                                          })
-                                      ),
-                                  }
-                                : {
-                                      type,
-                                      events: WithdrawalEventsMock.events.map(
-                                          (e) => ({
-                                              blockNumber: e.blockNumber,
-                                              transactionHash:
-                                                  e.transactionHash,
-                                              nullifierHex:
-                                                  e.args.nullifierHash,
-                                              fee: (e.args
-                                                  .fee as unknown) as BigNumber,
-                                              to: e.args.to,
-                                          })
-                                      ),
-                                  };
+        expect(unspentCount).to.be.equal(1);
 
-                        await tornadoEventsDB.updateEvents(
-                            AvailableNetworks.GOERLI,
-                            currencyAmountPair,
-                            events
-                        );
-                    }
-                );
+        // Add to pending withdrawal
+        let pending = await tornadoService['addPendingWithdrawal'](
+            deposit,
+            '0xabc',
+            18,
+            'goerli.goblank.io'
+        );
+        pending.chainId = 5;
 
-            await tornadoService.unlock(testPass, mnemonic);
+        expect(pending.status).to.be.equal(PendingWithdrawalStatus.UNSUBMITTED);
 
-            const deposit: IBlankDeposit = {
-                id: '12345678',
-                note: Buffer.alloc(62, 'f').toString('hex'),
-                nullifierHex: '0xd3751fe9080000',
-                pair: { amount: '1', currency: KnownCurrencies.ETH },
-                timestamp: new Date().getTime(),
-                spent: false,
-                depositIndex: 0,
-                status: DepositStatus.CONFIRMED,
-            };
-
-            // Add deposit
-            await (tornadoService as any).addDeposits([deposit]);
-
-            let unspentCount = await tornadoService.getUnspentDepositCount({
-                currency: KnownCurrencies.ETH,
-                amount: '1',
-            });
-
-            expect(unspentCount).to.be.equal(1);
-
-            await tornadoService.updateNotesSpentState();
-
-            unspentCount = await tornadoService.getUnspentDepositCount({
-                currency: KnownCurrencies.ETH,
-                amount: '1',
-            });
-
-            expect(unspentCount).to.be.equal(0);
+        await tornadoService['updatePendingWithdrawal'](pending.pendingId, {
+            status: PendingWithdrawalStatus.PENDING,
+            chainId: 5,
         });
 
-        it.skip('Should return compliance information correctly', async () => {
-            sinon
-                .stub(
-                    ethers.providers.StaticJsonRpcProvider.prototype,
-                    'getTransactionReceipt'
-                )
-                .returns(
-                    Promise.resolve({
-                        from: '0xe50002223413413',
-                    } as any)
-                );
+        let pendingWithdrawals =
+            tornadoService['_pendingWithdrawalsStore'].store.getState()[
+                AvailableNetworks.GOERLI
+            ];
 
-            sinon
-                .stub(
-                    ethers.providers.StaticJsonRpcProvider.prototype,
-                    'getBlock'
-                )
-                .returns(
-                    Promise.resolve({
-                        timestamp: 1439799168,
-                    } as any)
-                );
+        pending = pendingWithdrawals.pending[0];
+        pending.chainId = 5;
 
-            // Add both events here for testing simplification sake
-            sinon
-                .stub(tornadoService as any, 'updateTornadoEvents')
-                .callsFake(
-                    async (
-                        type: TornadoEvents,
-                        currencyAmountPair: CurrencyAmountPair
-                    ) => {
-                        const events =
-                            type === TornadoEvents.DEPOSIT
-                                ? {
-                                      type,
-                                      events: [
-                                          {
-                                              args: {
-                                                  leafIndex: 1,
-                                                  commitment:
-                                                      '0x1810d7e4144666802fa7f2d2b87ba945e0b641f94149f42110294186659b244f',
-                                                  timestamp: BigNumber.from(
-                                                      '0x60363746'
-                                                  ).toString(),
-                                              },
-                                              transactionHash:
-                                                  '0x222828182188921',
-                                              blockNumber: 29219,
-                                          },
-                                      ].map((e) => ({
-                                          blockNumber: e.blockNumber,
-                                          transactionHash: e.transactionHash,
-                                          ...e.args,
-                                      })),
-                                  }
-                                : {
-                                      type,
-                                      events: [
-                                          {
-                                              args: {
-                                                  nullifierHash:
-                                                      '0x21315e4bfbfe7cff7a31e14546b96abdfacf2281cb938beddce4f89fc132ba60',
-                                                  to: '0xf98765337659907',
-                                                  fee: (utils
-                                                      .parseEther('0.07')
-                                                      .toHexString() as unknown) as BigNumber,
-                                              },
-                                              blockNumber: 29219,
-                                              transactionHash:
-                                                  '0x333827262177432',
-                                          },
-                                      ].map((e) => ({
+        // Check for it
+        await tornadoService['checkPendingWithdrawal'](pending);
+
+        pendingWithdrawals = (
+            tornadoService as any
+        )._pendingWithdrawalsStore.store.getState()[AvailableNetworks.GOERLI];
+
+        expect(pendingWithdrawals.pending[0].status).to.be.equals(
+            PendingWithdrawalStatus.CONFIRMED
+        );
+
+        unspentCount = await tornadoService.getUnspentDepositCount({
+            currency: KnownCurrencies.ETH,
+            amount: '1',
+        });
+
+        expect(unspentCount).to.be.equal(0);
+    }).timeout(60000);
+
+    it('Should update spent notes state', async () => {
+        sinon
+            .stub(tornadoService['_notesService'], 'updateTornadoEvents')
+            .callsFake(
+                async (
+                    type: TornadoEvents,
+                    currencyAmountPair: CurrencyAmountPair
+                ) => {
+                    const events =
+                        type === TornadoEvents.DEPOSIT
+                            ? {
+                                  type,
+                                  events: DepositEventsMock.events.map((e) => ({
+                                      blockNumber: e.blockNumber,
+                                      transactionHash: e.transactionHash,
+                                      ...e.args,
+                                  })),
+                              }
+                            : {
+                                  type,
+                                  events: WithdrawalEventsMock.events.map(
+                                      (e) => ({
                                           blockNumber: e.blockNumber,
                                           transactionHash: e.transactionHash,
                                           nullifierHex: e.args.nullifierHash,
+                                          fee: e.args
+                                              .fee as unknown as BigNumber,
                                           to: e.args.to,
-                                          fee: e.args.fee,
-                                      })),
-                                  };
+                                      })
+                                  ),
+                              };
 
-                        await tornadoEventsDB.updateEvents(
-                            AvailableNetworks.GOERLI,
-                            currencyAmountPair,
-                            events
-                        );
-                    }
-                );
-
-            await tornadoService.unlock(testPass, mnemonic);
-            const deposit: IBlankDeposit = {
-                id: '12345678',
-                note: Buffer.alloc(62, 'f').toString('hex'),
-                nullifierHex:
-                    '0x21315e4bfbfe7cff7a31e14546b96abdfacf2281cb938beddce4f89fc132ba60',
-                pair: { amount: '1', currency: KnownCurrencies.ETH },
-                timestamp: new Date().getTime(),
-                spent: true,
-                depositIndex: 0,
-                status: DepositStatus.PENDING,
-            };
-
-            const compliance = await tornadoService.getComplianceInformation(
-                deposit
+                    await tornadoEventsDB.updateEvents(
+                        AvailableNetworks.GOERLI,
+                        currencyAmountPair,
+                        events
+                    );
+                }
             );
-            expect(compliance).to.be.deep.equal({
-                deposit: {
-                    pair: deposit.pair,
-                    spent: true,
-                    timestamp: new Date(1614165830 * 1000),
-                    commitment:
-                        '0x1810d7e4144666802fa7f2d2b87ba945e0b641f94149f42110294186659b244f',
-                    transactionHash: '0x222828182188921',
-                    from: '0xe50002223413413',
-                },
-                withdrawal: {
-                    pair: deposit.pair,
-                    to: '0xf98765337659907',
-                    transactionHash: '0x333827262177432',
-                    timestamp: new Date(1439799168 * 1000),
-                    fee: '0.07',
-                    nullifier:
-                        '0x21315e4bfbfe7cff7a31e14546b96abdfacf2281cb938beddce4f89fc132ba60',
-                },
-            });
+
+        await tornadoService.unlock(testPass, mnemonic);
+
+        const deposit: IBlankDeposit = {
+            id: '12345678',
+            note: Buffer.alloc(62, 'f').toString('hex'),
+            nullifierHex: '0xd3751fe9080000',
+            pair: { amount: '1', currency: KnownCurrencies.ETH },
+            timestamp: new Date().getTime(),
+            spent: false,
+            depositIndex: 0,
+            status: DepositStatus.CONFIRMED,
+        };
+
+        // Add deposit
+        await (tornadoService as any)['_blankDepositVault'].addDeposits([
+            deposit,
+        ]);
+
+        let unspentCount = await tornadoService.getUnspentDepositCount({
+            currency: KnownCurrencies.ETH,
+            amount: '1',
         });
-    });
+
+        expect(unspentCount).to.be.equal(1);
+
+        await tornadoService.updateNotesSpentState();
+
+        unspentCount = await tornadoService.getUnspentDepositCount({
+            currency: KnownCurrencies.ETH,
+            amount: '1',
+        });
+
+        expect(unspentCount).to.be.equal(0);
+    }).timeout(60000);
+
+    it('Should return compliance information correctly', async () => {
+        sinon
+            .stub(
+                ethers.providers.StaticJsonRpcProvider.prototype,
+                'getTransactionReceipt'
+            )
+            .returns(
+                Promise.resolve({
+                    from: '0xe50002223413413',
+                } as any)
+            );
+
+        sinon
+            .stub(ethers.providers.StaticJsonRpcProvider.prototype, 'getBlock')
+            .returns(
+                Promise.resolve({
+                    timestamp: 1439799168,
+                } as any)
+            );
+
+        // Add both events here for testing simplification sake
+        sinon
+            .stub(tornadoService as any, 'updateTornadoEvents')
+            .callsFake(
+                async (
+                    type: TornadoEvents,
+                    currencyAmountPair: CurrencyAmountPair
+                ) => {
+                    const events =
+                        type === TornadoEvents.DEPOSIT
+                            ? {
+                                  type,
+                                  events: [
+                                      {
+                                          args: {
+                                              leafIndex: 1,
+                                              commitment:
+                                                  '0x1810d7e4144666802fa7f2d2b87ba945e0b641f94149f42110294186659b244f',
+                                              timestamp:
+                                                  BigNumber.from(
+                                                      '0x60363746'
+                                                  ).toString(),
+                                          },
+                                          transactionHash: '0x222828182188921',
+                                          blockNumber: 29219,
+                                      },
+                                  ].map((e) => ({
+                                      blockNumber: e.blockNumber,
+                                      transactionHash: e.transactionHash,
+                                      ...e.args,
+                                  })),
+                              }
+                            : {
+                                  type,
+                                  events: [
+                                      {
+                                          args: {
+                                              nullifierHash:
+                                                  '0x21315e4bfbfe7cff7a31e14546b96abdfacf2281cb938beddce4f89fc132ba60',
+                                              to: '0xf98765337659907',
+                                              fee: utils
+                                                  .parseEther('0.07')
+                                                  .toHexString() as unknown as BigNumber,
+                                          },
+                                          blockNumber: 29219,
+                                          transactionHash: '0x333827262177432',
+                                      },
+                                  ].map((e) => ({
+                                      blockNumber: e.blockNumber,
+                                      transactionHash: e.transactionHash,
+                                      nullifierHex: e.args.nullifierHash,
+                                      to: e.args.to,
+                                      fee: e.args.fee,
+                                  })),
+                              };
+
+                    await tornadoEventsDB.updateEvents(
+                        AvailableNetworks.GOERLI,
+                        currencyAmountPair,
+                        events
+                    );
+                }
+            );
+
+        await tornadoService.unlock(testPass, mnemonic);
+        const deposit: IBlankDeposit = {
+            id: '12345678',
+            note: Buffer.alloc(62, 'f').toString('hex'),
+            nullifierHex:
+                '0x21315e4bfbfe7cff7a31e14546b96abdfacf2281cb938beddce4f89fc132ba60',
+            pair: { amount: '1', currency: KnownCurrencies.ETH },
+            timestamp: new Date().getTime(),
+            spent: true,
+            depositIndex: 0,
+            status: DepositStatus.PENDING,
+        };
+
+        const compliance = await tornadoService.getComplianceInformation(
+            deposit
+        );
+        expect(compliance).to.be.deep.equal({
+            deposit: {
+                pair: deposit.pair,
+                spent: true,
+                timestamp: new Date(1614165830 * 1000),
+                commitment:
+                    '0x1810d7e4144666802fa7f2d2b87ba945e0b641f94149f42110294186659b244f',
+                transactionHash: '0x222828182188921',
+                from: '0xe50002223413413',
+            },
+            withdrawal: {
+                pair: deposit.pair,
+                to: '0xf98765337659907',
+                transactionHash: '0x333827262177432',
+                timestamp: new Date(1439799168 * 1000),
+                fee: '0.07',
+                feeBN: BigNumber.from('0xf8b0a10e470000'),
+                nullifier:
+                    '0x21315e4bfbfe7cff7a31e14546b96abdfacf2281cb938beddce4f89fc132ba60',
+            },
+        });
+    }).timeout(60000);
 });
 
 function clearDbs(tornadoEventsDB: TornadoEventsDB) {

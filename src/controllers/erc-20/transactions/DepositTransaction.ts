@@ -11,7 +11,6 @@ import {
 } from '../../blank-deposit/tornado/TornadoService';
 import { currencyAmountPairToMapKey } from '../../blank-deposit/tornado/utils';
 import { CurrencyAmountPair, KnownCurrencies } from '../../blank-deposit/types';
-import { FeeData } from '../../GasPricesController';
 import { TransactionGasEstimation } from '../../transactions/TransactionController';
 import {
     TransactionCategories,
@@ -30,6 +29,7 @@ import {
     PopulatedTransactionParams,
     SignedTransaction,
     SignedTransactionProps,
+    TransactionFeeData,
 } from './SignedTransaction';
 import { TokenOperationsController } from './Transaction';
 
@@ -199,7 +199,7 @@ export class DepositTransaction extends SignedTransaction {
     public async addAsNewDepositTransaction(
         currencyAmountPair: CurrencyAmountPair,
         populatedTransaction: ethers.PopulatedTransaction,
-        feeData: FeeData,
+        feeData: TransactionFeeData,
         approveUnlimited = false
     ): Promise<TransactionMeta> {
         // Get Tornado contract
@@ -326,7 +326,7 @@ export class DepositTransaction extends SignedTransaction {
      */
     public async addAsNewTransaction(
         populatedTransaction: ethers.PopulatedTransaction,
-        feeData: FeeData
+        feeData: TransactionFeeData
     ): Promise<TransactionMeta> {
         feeData.gasLimit =
             feeData.gasLimit || BigNumber.from(DEPOSIT_GAS_LIMIT);

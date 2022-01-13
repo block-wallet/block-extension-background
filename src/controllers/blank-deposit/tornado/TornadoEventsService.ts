@@ -27,6 +27,8 @@ export interface EventsFetchOptions {
 
 const MAX_HTTP_RETRIES = 5;
 const RETRIES_DELAY = 500;
+const BLOCKS_TO_FETCH = 1000000;
+const MAX_CHAIN_RETRIES = 20;
 
 export class TornadoEventsService {
     private readonly _blockUpdatesController: BlockUpdatesController;
@@ -89,6 +91,7 @@ export class TornadoEventsService {
             );
 
             for (let i = 0; i < results.length; i++) {
+                /* eslint-disable-next-line */
                 const result = results[i] as any;
 
                 if (type == 'deposits') {
@@ -120,7 +123,8 @@ export class TornadoEventsService {
                     ? TornadoEvents.DEPOSIT
                     : TornadoEvents.WITHDRAWAL,
                 chainOptions.fromBlock,
-                chainOptions.contract
+                chainOptions.contract,
+                chainOptions.fromBlock + BLOCKS_TO_FETCH
             );
 
             for (let i = 0; i < results.length; i++) {
@@ -231,22 +235,15 @@ export class TornadoEventsService {
         type: TornadoEvents,
         fromBlock: number,
         contract: Contract,
-        toBlock: number | 'latest' = 'latest'
+        toBlock: number
     ): Promise<Event[]> => {
         const filter = contract.filters[type]();
-        const blockNumber = this._blockUpdatesController.getBlockNumber();
-        let _toBlock = 0;
-
-        if (toBlock === 'latest') {
-            _toBlock = blockNumber;
-        } else {
-            _toBlock = toBlock;
-        }
 
         const getLogsPaginated = async (
             fromBlock: number,
             toBlock: number,
-            obtainedEvents: Event[] = []
+            obtainedEvents: Event[] = [],
+            retry = 0
         ): Promise<Event[]> => {
             try {
                 const events = await contract.queryFilter(
@@ -254,30 +251,40 @@ export class TornadoEventsService {
                     fromBlock,
                     toBlock
                 );
+
+                const blockNumber =
+                    this._blockUpdatesController.getBlockNumber();
+
                 if (toBlock < blockNumber) {
-                    return getLogsPaginated(toBlock + 1, blockNumber, [
-                        ...obtainedEvents,
-                        ...events,
-                    ]);
+                    fromBlock = toBlock + 1;
+                    return getLogsPaginated(
+                        fromBlock,
+                        fromBlock + BLOCKS_TO_FETCH,
+                        [...obtainedEvents, ...events],
+                        0
+                    );
                 } else {
                     return [...obtainedEvents, ...events];
                 }
             } catch (error) {
-                if (error.body) {
-                    // More than 10k results
+                retry = retry + 1;
+                if (retry < MAX_CHAIN_RETRIES) {
+                    await delay(RETRIES_DELAY * retry);
                     const toNextBlock =
                         fromBlock + Math.floor((toBlock - fromBlock) / 2);
                     return getLogsPaginated(
                         fromBlock,
                         toNextBlock,
-                        obtainedEvents
+                        obtainedEvents,
+                        retry
                     );
+                } else {
+                    throw new Error('Unable to fetch the events');
                 }
-                throw new Error('Unable to fetch the events');
             }
         };
 
-        return getLogsPaginated(fromBlock, _toBlock);
+        return getLogsPaginated(fromBlock, toBlock);
     };
 
     private _parseEndpoint(rawEndpoint: string, version: string): string {

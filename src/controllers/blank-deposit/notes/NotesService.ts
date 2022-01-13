@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import { CurrencyAmountPair } from '../types';
 import { IBlankDeposit } from '../BlankDeposit';
-import { INotesService } from './INotesService';
+import { INotesService, NextDepositResult } from './INotesService';
 import { babyJub, pedersenHash } from 'circomlib';
 import HDKey from 'ethereumjs-wallet/dist/hdkey';
 import { mnemonicToSeed } from 'bip39';
@@ -42,7 +42,7 @@ export abstract class NotesService implements INotesService {
     public abstract reconstruct(
         mnemonic: string,
         lastDepositIndex?: number
-    ): Promise<PromiseSettledResult<IBlankDeposit[]>[]>;
+    ): Promise<PromiseSettledResult<NextDepositResult>[]>;
 
     /* Protected methods */
 
@@ -62,24 +62,27 @@ export abstract class NotesService implements INotesService {
     /**
      * getNextUnderivedDeposit
      *
-     * It yields the next underived deposit
+     * It returns the next underived deposit
      *
+     * @param currencyAmountPairKey The currency/amount pair key
      * @param numberOfDeposits The number of known deposits
+     * @param isReconstruct Whether the method is executed in the context of a reconstruction (for error handling)
+     * @param ignoreFetch Whether to skip new deposit fetch
+     * @param chainId The chain id to make the derivation in
      */
     protected abstract getNextUnderivedDeposit(
         currencyAmountPairKey: string,
-        numberOfDeposits?: number
-    ): AsyncGenerator<
-        {
-            spent?: boolean;
-            deposit: INoteDeposit;
-            timestamp?: number;
-            exists?: boolean;
-            increment?: () => number;
-        },
-        void,
-        unknown
-    >;
+        numberOfDeposits?: number,
+        isReconstruct?: boolean,
+        ignoreFetch?: boolean,
+        chainId?: number
+    ): Promise<{
+        spent?: boolean;
+        deposit: INoteDeposit;
+        timestamp?: number;
+        exists?: boolean;
+        increment?: () => number;
+    }>;
 
     /**
      * getRootPath

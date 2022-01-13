@@ -69,6 +69,7 @@ describe.skip('Swap Controller', () => {
         networkController,
         tokenController,
         tokenOperationsController,
+        preferencesController,
         { accounts: {}, isAccountTrackerLoading: false }
     );
 

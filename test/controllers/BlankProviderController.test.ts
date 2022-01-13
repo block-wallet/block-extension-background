@@ -1,51 +1,37 @@
-import { expect } from 'chai';
+import AppStateController from '@blank/background/controllers/AppStateController';
+import BlankProviderController from '@blank/background/controllers/BlankProviderController';
+import KeyringControllerDerivated from '@blank/background/controllers/KeyringControllerDerivated';
+import MockDepositController from '../mocks/mock-deposit-controller';
 import NetworkController from '../../src/controllers/NetworkController';
+import PermissionsController from '@blank/background/controllers/PermissionsController';
+import TransactionController from '@blank/background/controllers/transactions/TransactionController';
+import initialState from '@blank/background/utils/constants/initialState';
+import sinon from 'sinon';
 import { AccountTrackerController } from '../../src/controllers/AccountTrackerController';
-import { mockPreferencesController } from '../mocks/mock-preferences';
-import { mockKeyringController } from '../mocks/mock-keyring-controller';
-import { mockedPermissionsController } from '../mocks/mock-permissions';
 import { BigNumber, ethers } from 'ethers';
+import { GasPricesController } from '@blank/background/controllers/GasPricesController';
+import { JSONRPCMethod } from '@blank/background/utils/types/ethereum';
+import { PreferencesController } from '@blank/background/controllers/PreferencesController';
 import { TokenController } from '../../src/controllers/erc-20/TokenController';
 import { TokenOperationsController } from '@blank/background/controllers/erc-20/transactions/Transaction';
-import { JSONRPCMethod } from '@blank/background/utils/types/ethereum';
-import BlankProviderController from '@blank/background/controllers/BlankProviderController';
-import sinon from 'sinon';
-import { providerInstances } from '@blank/background/infrastructure/connection';
-import AppStateController from '@blank/background/controllers/AppStateController';
-import MockDepositController from '../mocks/mock-deposit-controller';
-import { PreferencesController } from '@blank/background/controllers/PreferencesController';
-import PermissionsController, {
-    PermissionsControllerState,
-} from '@blank/background/controllers/PermissionsController';
-import { GasPricesController } from '@blank/background/controllers/GasPricesController';
-import initialState from '@blank/background/utils/constants/initialState';
 import { TypedTransaction } from '@ethereumjs/tx';
+import { expect } from 'chai';
 import { getNetworkControllerInstance } from '../mocks/mock-network-instance';
-import BlockUpdatesController from '@blank/background/controllers/BlockUpdatesController';
-import { ExchangeRatesController } from '@blank/background/controllers/ExchangeRatesController';
-import { IncomingTransactionController } from '@blank/background/controllers/IncomingTransactionController';
-import TransactionController from '@blank/background/controllers/transactions/TransactionController';
-import KeyringControllerDerivated from '@blank/background/controllers/KeyringControllerDerivated';
+import { hexValue } from 'ethers/lib/utils';
+import { mockKeyringController } from '../mocks/mock-keyring-controller';
+import { mockPreferencesController } from '../mocks/mock-preferences';
+import { mockedPermissionsController } from '../mocks/mock-permissions';
+import { providerInstances } from '@blank/background/infrastructure/connection';
 
-const TRANSACTION_HASH =
-    '0x1f842e47fc13c96a56d57182b1e00d8db34c515bc4366102d4a2a5fb0d23e7d2';
+const UNI_ORIGIN = 'https://app.uniswap.org';
+const TX_HASH =
+    '0x3979f7ae255171ae6c6fd1c625219b45e2da7e52e6401028c29f0f27581af601';
 const TEXT_FOR_HASH = 'HASH ME';
 
-describe('Blank Provider Controller', function () {
+describe('Blank provider controller', function () {
     const defaultIdleTimeout = 5;
     const initialLastActiveTime = new Date().getTime();
     const portId = '7e24f69d-c740-4eb3-9c6e-4d47df491005';
-
-    providerInstances[portId] = {
-        port: chrome.runtime.connect(),
-        tabId: 420,
-        origin: 'https://app.uniswap.org',
-        siteMetadata: {
-            iconURL: 'https://app.uniswap.org/favicon.png',
-            name: 'Uniswap',
-        },
-    };
-
     const accounts = {
         goerli: [
             {
@@ -59,28 +45,36 @@ describe('Blank Provider Controller', function () {
         ],
     };
 
-    let networkController: NetworkController;
+    providerInstances[portId] = {
+        port: chrome.runtime.connect(),
+        tabId: 420,
+        origin: UNI_ORIGIN,
+        siteMetadata: {
+            iconURL: 'https://app.uniswap.org/favicon.png',
+            name: 'Uniswap',
+        },
+    };
+
     let accountTrackerController: AccountTrackerController;
-    let transactionController: TransactionController;
+    let appStateController: AppStateController;
+    let blankProviderController: BlankProviderController;
+    let gasPricesController: GasPricesController;
+    let keyringController: KeyringControllerDerivated;
+    let networkController: NetworkController;
+    let permissionsController: PermissionsController;
+    let preferencesController: PreferencesController;
     let tokenController: TokenController;
     let tokenOperationsController: TokenOperationsController;
-    let blankProviderController: BlankProviderController;
-    let appStateController: AppStateController;
-    let preferencesController: PreferencesController;
-    let permissionsController: PermissionsController;
-    let keyringController: KeyringControllerDerivated;
-    let blockUpdatesController: BlockUpdatesController;
-    let exchangeRatesController: ExchangeRatesController;
-    let incomingTransactionController: IncomingTransactionController;
-    let gasPricesController: GasPricesController;
+    let transactionController: TransactionController;
 
     beforeEach(function () {
         const depositController = MockDepositController();
 
+        // Instantiate objects
+        networkController = getNetworkControllerInstance();
+
         preferencesController = mockPreferencesController;
         permissionsController = mockedPermissionsController;
-
-        networkController = getNetworkControllerInstance();
 
         tokenOperationsController = new TokenOperationsController({
             networkController: networkController,
@@ -102,7 +96,8 @@ describe('Blank Provider Controller', function () {
             mockKeyringController,
             networkController,
             tokenController,
-            tokenOperationsController
+            tokenOperationsController,
+            preferencesController
         );
 
         appStateController = new AppStateController(
@@ -117,29 +112,6 @@ describe('Blank Provider Controller', function () {
         gasPricesController = new GasPricesController(
             initialState.GasPricesController,
             networkController
-        );
-
-        exchangeRatesController = new ExchangeRatesController(
-            {
-                exchangeRates: { ETH: 2786.23, USDT: 1 },
-                networkNativeCurrency: {
-                    symbol: 'ETH',
-                    // Default Coingecko id for ETH rates
-                    coingeckoPlatformId: 'ethereum',
-                },
-            },
-            preferencesController,
-            networkController,
-            () => {
-                return {};
-            }
-        );
-
-        incomingTransactionController = new IncomingTransactionController(
-            networkController,
-            preferencesController,
-            accountTrackerController,
-            { incomingTransactions: {} }
         );
 
         transactionController = new TransactionController(
@@ -157,16 +129,6 @@ describe('Blank Provider Controller', function () {
             { txHistoryLimit: 40 }
         );
 
-        blockUpdatesController = new BlockUpdatesController(
-            networkController,
-            accountTrackerController,
-            gasPricesController,
-            exchangeRatesController,
-            incomingTransactionController,
-            transactionController,
-            { blockData: {} }
-        );
-
         keyringController = new KeyringControllerDerivated({});
 
         blankProviderController = new BlankProviderController(
@@ -175,8 +137,7 @@ describe('Blank Provider Controller', function () {
             mockedPermissionsController,
             appStateController,
             keyringController,
-            tokenController,
-            blockUpdatesController
+            tokenController
         );
 
         accountTrackerController.addPrimaryAccount(
@@ -188,121 +149,165 @@ describe('Blank Provider Controller', function () {
         sinon.restore();
     });
 
-    it('Should get accounts correctly', async function () {
-        const accounts = Object.keys(
-            accountTrackerController.store.getState().accounts
-        );
+    it('Should init properly', () => {
+        const { dappRequests } = blankProviderController.store.getState();
+        expect(dappRequests).to.be.empty;
+    });
 
-        sinon.stub(appStateController.UIStore, 'getState').returns({
-            isAppUnlocked: true,
+    describe('Provider requests', () => {
+        before(async () => {
+            // Stub ethers methods
+            sinon.stub(ethers, 'Contract').returns({
+                balances: (
+                    addresses: string[],
+                    _ethBalance: string[]
+                ): BigNumber[] => addresses.map(() => BigNumber.from('999')),
+            } as any);
         });
-        sinon.stub(permissionsController.store, 'getState').returns({
-            permissions: {
-                'https://app.uniswap.org': {
-                    accounts: accounts,
-                    activeAccount: accounts[0],
-                    data: { name: '', iconURL: '' },
-                    origin: '',
+
+        it('Should get balance', async function () {
+            sinon
+                .stub(ethers.providers.JsonRpcProvider.prototype, 'send')
+                .returns(Promise.resolve('0x00'));
+            const accountsController =
+                accountTrackerController.store.getState().accounts;
+            const targetAddress = Object.keys(accountsController)[0];
+            const balance = BigNumber.from(0);
+            const balanceWeb3 = await blankProviderController.handle(portId, {
+                params: [targetAddress],
+                method: JSONRPCMethod.eth_getBalance,
+            });
+
+            expect(balanceWeb3).to.be.equal(balance._hex);
+        });
+
+        it('Should fetch latest block number', async function () {
+            sinon
+                .stub(ethers.providers.JsonRpcProvider.prototype, 'send')
+                .returns(Promise.resolve('0x599dbe'));
+
+            const web3latestBlockNr = parseInt(
+                (await blankProviderController.handle(portId, {
+                    method: JSONRPCMethod.eth_blockNumber,
+                    params: [],
+                })) as string
+            );
+
+            expect(web3latestBlockNr).to.be.equal(5873086);
+        });
+
+        it('Should fetch transaction count', async function () {
+            sinon
+                .stub(ethers.providers.JsonRpcProvider.prototype, 'send')
+                .returns(Promise.resolve(0));
+            const accountsController =
+                accountTrackerController.store.getState().accounts;
+            const targetAddress = Object.keys(accountsController)[0];
+            const transactionCountWeb3 = await blankProviderController.handle(
+                portId,
+                {
+                    method: JSONRPCMethod.eth_getTransactionCount,
+                    params: [targetAddress],
+                }
+            );
+
+            expect(transactionCountWeb3).to.be.equal(0);
+        });
+
+        it('Should get transaction by hash', async function () {
+            sinon
+                .stub(ethers.providers.JsonRpcProvider.prototype, 'send')
+                .returns(
+                    Promise.resolve({
+                        blockHash:
+                            '0x4262f108d324574999aac9e5d9500118732e252b600d71c44079dd25ad2e7ee1',
+                        blockNumber: '0xd2d61b',
+                        from: '0xd911f68222acff6f6036d98e2909f85f781d3a47',
+                        gas: '0x2aea6',
+                        gasPrice: '0x25fda44264',
+                        maxFeePerGas: '0x2721e01771',
+                        maxPriorityFeePerGas: '0x64f29720',
+                        hash: '0x3979f7ae255171ae6c6fd1c625219b45e2da7e52e6401028c29f0f27581af601',
+                        input: '0x7ff36ab500000000000000000000000000000000000000000000001990c704258d5b3bd90000000000000000000000000000000000000000000000000000000000000080000000000000000000000000d911f68222acff6f6036d98e2909f85f781d3a470000000000000000000000000000000000000000000000000000000061bb75890000000000000000000000000000000000000000000000000000000000000002000000000000000000000000c02aaa39b223fe8d0a0e5c4f27ead9083c756cc200000000000000000000000041a3dba3d677e573636ba691a70ff2d606c29666',
+                        nonce: '0x1',
+                        to: '0x7a250d5630b4cf539739df2c5dacb4c659f2488d',
+                        transactionIndex: '0x69',
+                        value: '0x13fbe85edc90000',
+                        type: '0x2',
+                        accessList: [],
+                        chainId: '0x1',
+                        v: '0x0',
+                        r: '0xc2fe0bda3cf75fe3ba24468ff1eeb7ba9e7cd6990a240ac9b6763f44100fd78',
+                        s: '0x10f7879ba1451691e924280c3881066fa047e37aef50bcc15dfd8082ca099026',
+                    })
+                );
+
+            const web3Trx: any = await blankProviderController.handle(portId, {
+                method: JSONRPCMethod.eth_getTransactionByHash,
+                params: [TX_HASH],
+            });
+
+            expect(web3Trx.hash).to.be.equal(TX_HASH);
+        });
+    }).timeout(10000);
+
+    describe('Wallet requests', () => {
+        it('Should get accounts', async function () {
+            const accounts = Object.keys(
+                accountTrackerController.store.getState().accounts
+            );
+
+            sinon.stub(appStateController.UIStore, 'getState').returns({
+                isAppUnlocked: true,
+            });
+            sinon.stub(permissionsController.store, 'getState').returns({
+                permissions: {
+                    'https://app.uniswap.org': {
+                        accounts: accounts,
+                        activeAccount: accounts[0],
+                        data: { name: '', iconURL: '' },
+                        origin: '',
+                    },
                 },
-            },
-            permissionRequests: {},
-        } as PermissionsControllerState);
+                permissionRequests: {},
+            });
 
-        const payload = {
-            parameters: [],
-            method: JSONRPCMethod.eth_accounts,
-        };
-        const accountsWeb3 = await blankProviderController.handle(
-            portId,
-            payload
-        );
-        expect(accountsWeb3).to.deep.equal(
-            permissionsController.store.getState().permissions[
-                'https://app.uniswap.org'
-            ].accounts
-        );
-    });
+            const accountsWeb3 = await blankProviderController.handle(portId, {
+                params: [],
+                method: JSONRPCMethod.eth_accounts,
+            });
 
-    it('Should get balance correctly', async function () {
-        sinon
-            .stub(ethers.providers.JsonRpcProvider.prototype, 'send')
-            .returns(Promise.resolve('0x00'));
-        const accountsController =
-            accountTrackerController.store.getState().accounts;
-        const targetAddress = Object.keys(accountsController)[0];
-        const balance = BigNumber.from(0);
-        const payload = {
-            parameters: [targetAddress],
-            method: JSONRPCMethod.eth_getBalance,
-        };
-        const balanceWeb3 = await blankProviderController.handle(
-            portId,
-            payload
-        );
+            expect(accountsWeb3).to.deep.equal(
+                permissionsController.store.getState().permissions[
+                    'https://app.uniswap.org'
+                ].accounts
+            );
+        });
 
-        expect(balanceWeb3).to.be.equal(balance._hex);
-    });
+        it('Should get chain id', async function () {
+            const chainId = await blankProviderController.handle(portId, {
+                params: [],
+                method: JSONRPCMethod.eth_chainId,
+            });
 
-    it('Should fetch latest block number correctly', async function () {
-        sinon
-            .stub(ethers.providers.JsonRpcProvider.prototype, 'send')
-            .returns(Promise.resolve('0x599dbe'));
-        const payload = {
-            method: JSONRPCMethod.eth_blockNumber,
-            params: [],
-        };
-        const web3latestBlockNr = parseInt(
-            (await blankProviderController.handle(portId, payload)) as string
-        );
+            const network = networkController.network;
 
-        expect(web3latestBlockNr).to.be.equal(5873086);
-    }).timeout(15000);
+            expect(chainId).to.be.equal(hexValue(network.chainId));
+        });
+    }).timeout(10000);
 
-    it('Should fetch transaction count correctly', async function () {
-        sinon
-            .stub(ethers.providers.JsonRpcProvider.prototype, 'send')
-            .returns(Promise.resolve(0));
-        const accountsController =
-            accountTrackerController.store.getState().accounts;
-        const targetAddress = Object.keys(accountsController)[0];
-        const payload = {
-            method: JSONRPCMethod.eth_getTransactionCount,
-            params: [targetAddress],
-        };
-        const transactionCountWeb3 = await blankProviderController.handle(
-            portId,
-            payload
-        );
+    describe('Utils', () => {
+        it('Should hash sha3', async function () {
+            const utilHash = ethers.utils.keccak256(
+                ethers.utils.toUtf8Bytes(TEXT_FOR_HASH)
+            );
 
-        expect(transactionCountWeb3).to.be.equal(0);
-    });
+            const web3Hash = await blankProviderController.handle(portId, {
+                method: JSONRPCMethod.web3_sha3,
+                params: [TEXT_FOR_HASH],
+            });
 
-    it('Should get transaction by hash correctly', async function () {
-        const providerTrx = await networkController
-            .getProvider()
-            .getTransaction(TRANSACTION_HASH);
-        const payload = {
-            method: JSONRPCMethod.eth_getTransactionByHash,
-            params: [TRANSACTION_HASH],
-        };
-        const web3Trx: any = await blankProviderController.handle(
-            portId,
-            payload
-        );
-
-        expect(web3Trx.hash).to.be.equal(providerTrx.hash);
-    });
-
-    it('Should sha3 correctly', async function () {
-        const utilHash = ethers.utils.keccak256(
-            ethers.utils.toUtf8Bytes(TEXT_FOR_HASH)
-        );
-        const payload = {
-            method: JSONRPCMethod.web3_sha3,
-            params: [TEXT_FOR_HASH],
-        };
-        const web3Hash = await blankProviderController.handle(portId, payload);
-
-        expect(utilHash).to.be.equal(web3Hash);
+            expect(utilHash).to.be.equal(web3Hash);
+        });
     });
 });

@@ -101,7 +101,7 @@ export default class KeyringControllerDerivated extends KeyringController {
      * @returns {Promise<Object>} A Promise that resolves to the state.
      */
     @Hasheable
-    public submitPassword(
+    public async submitPassword(
         @Hash password: string
     ): Promise<KeyringControllerState> {
         return super.submitPassword(password);
@@ -116,7 +116,7 @@ export default class KeyringControllerDerivated extends KeyringController {
      * @param {string} password
      */
     @Hasheable
-    public verifyPassword(@Hash password: string): Promise<void> {
+    public async verifyPassword(@Hash password: string): Promise<void> {
         return super.verifyPassword(password);
     }
 

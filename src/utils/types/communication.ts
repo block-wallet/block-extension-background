@@ -12,7 +12,7 @@ import { BigNumber } from '@ethersproject/bignumber';
 import { AccountInfo } from '../../controllers/AccountTrackerController';
 import { GasPriceValue } from '../../controllers/transactions/TransactionController';
 import { ITokens, Token } from '../../controllers/erc-20/Token';
-import { TransactionMeta } from '../../controllers/transactions/utils/types';
+import { TransactionAdvancedData, TransactionMeta } from '../../controllers/transactions/utils/types';
 import { ImportStrategy, ImportArguments } from '../account';
 import {
     QuoteParameters,
@@ -26,8 +26,6 @@ import {
     ProviderSetupData,
 } from '@blank/provider/types';
 
-import { FeeData } from '@blank/background/controllers/GasPricesController';
-
 import {
     AddressBookEntry,
     NetworkAddressBook,
@@ -38,6 +36,7 @@ import {
     PopupTabs,
     UserSettings,
 } from '@blank/background/controllers/PreferencesController';
+import { TransactionFeeData } from '@blank/background/controllers/erc-20/transactions/SignedTransaction';
 
 enum ACCOUNT {
     CREATE = 'CREATE_ACCOUNT',
@@ -137,10 +136,10 @@ enum TRANSACTION {
     CONFIRM = 'CONFIRM_TRANSACTION',
     REJECT = 'REJECT_TRANSACTION',
     GET_LATEST_GAS_PRICE = 'GET_LATEST_GAS_PRICE',
-    GET_LATEST_BASE_FEE = 'GET_LATEST_BASE_FEE',
     SEND_ETHER = 'SEND_ETHER',
     CANCEL_TRANSACTION = 'CANCEL_TRANSACTION',
     SPEED_UP_TRANSACTION = 'SPEED_UP_TRANSACTION',
+    GET_NEXT_NONCE = "GET_NEXT_NONCE"
 }
 
 enum WALLET {
@@ -310,7 +309,6 @@ export interface RequestSignatures {
     [Messages.TRANSACTION.CONFIRM]: [RequestConfirmTransaction, string];
     [Messages.TRANSACTION.REJECT]: [RequestRejectTransaction, boolean];
     [Messages.TRANSACTION.GET_LATEST_GAS_PRICE]: [undefined, BigNumber];
-    [Messages.TRANSACTION.GET_LATEST_BASE_FEE]: [undefined, BigNumber];
     [Messages.TRANSACTION.CONFIRM]: [RequestConfirmTransaction, string];
     [Messages.TRANSACTION.SEND_ETHER]: [RequestSendEther, string];
     [Messages.TRANSACTION.ADD_NEW_SEND_TRANSACTION]: [
@@ -341,6 +339,10 @@ export interface RequestSignatures {
     [Messages.TRANSACTION.SPEED_UP_TRANSACTION]: [
         RequestSpeedUpTransaction,
         void
+    ];
+    [Messages.TRANSACTION.GET_NEXT_NONCE]: [
+        RequestNextNonce,
+        number
     ];
     [Messages.WALLET.CREATE]: [RequestWalletCreate, void];
     [Messages.WALLET.IMPORT]: [RequestWalletImport, boolean];
@@ -450,18 +452,18 @@ export interface RequestSetMetadata {
 export interface RequestBlankDeposit {
     pair: CurrencyAmountPair;
     unlimitedAllowance?: boolean;
-    feeData: FeeData;
+    feeData: TransactionFeeData;
 }
 
 export interface RequestAddAsNewDepositTransaction {
     currencyAmountPair: CurrencyAmountPair;
     unlimitedAllowance?: boolean;
-    feeData: FeeData;
+    feeData: TransactionFeeData;
 }
 
 export interface RequestUpdateDepositTransactionGas {
     transactionId: string;
-    feeData: FeeData;
+    feeData: TransactionFeeData;
 }
 
 export interface RequestApproveDepositTransaction {
@@ -584,13 +586,15 @@ export interface RequestUpdateSitePermissions {
 
 export interface RequestConfirmTransaction {
     id: string;
-    feeData: FeeData;
+    feeData: TransactionFeeData;
+    advancedData: TransactionAdvancedData;
 }
 
 export interface RequestSendEther {
     to: string;
     value: BigNumber;
-    feeData: FeeData;
+    feeData: TransactionFeeData;
+    advancedData: TransactionAdvancedData;
 }
 
 export interface RequestWalletCreate {
@@ -600,7 +604,7 @@ export interface RequestWalletCreate {
 export interface RequestSeedPhrase {
     password: string;
 }
-export interface RequestCompleteSetup {}
+export interface RequestCompleteSetup { }
 
 export interface RequestWalletImport {
     password: string;
@@ -661,19 +665,20 @@ export interface RequestSendToken {
     tokenAddress: string;
     to: string;
     value: BigNumber;
-    feeData: FeeData;
+    feeData: TransactionFeeData;
+    advancedData: TransactionAdvancedData;
 }
 
 export interface RequestAddAsNewSendTransaction {
     address: string;
     to: string;
     value: BigNumber;
-    feeData: FeeData;
+    feeData: TransactionFeeData;
 }
 
 export interface RequestUpdateSendTransactionGas {
     transactionId: string;
-    feeData: FeeData;
+    feeData: TransactionFeeData;
 }
 
 export interface RequestApproveSendTransaction {
@@ -743,7 +748,7 @@ export interface RequestRejectTransaction {
     transactionId: string;
 }
 
-export interface RequestAddressBookClear {}
+export interface RequestAddressBookClear { }
 
 export interface RequestAddressBookDelete {
     address: string;
@@ -755,7 +760,7 @@ export interface RequestAddressBookSet {
     note?: string;
 }
 
-export interface RequestAddressBookGet {}
+export interface RequestAddressBookGet { }
 export interface RequestAddressBookGetByAddress {
     address: string;
 }
@@ -768,6 +773,10 @@ export interface RequestUserSettings {
 
 export interface RequestUpdatePopupTab {
     popupTab: PopupTabs;
+}
+
+export interface RequestNextNonce {
+    address: string;
 }
 
 export type ResponseTypes = {
@@ -794,6 +803,7 @@ export type StateSubscription = Flatten<BlankAppUIState>;
 export interface ExternalEventSubscription {
     eventName: ProviderEvents;
     payload: any;
+    portId?: string;
 }
 
 export interface TransportRequestMessage<TMessageType extends MessageTypes> {

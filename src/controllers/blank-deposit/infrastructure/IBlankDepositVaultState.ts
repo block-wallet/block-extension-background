@@ -1,7 +1,7 @@
 import { AvailableNetworks } from '../types';
 import { IBlankDeposit } from '../BlankDeposit';
 
-interface BlankDepositVaultState {
+export interface BlankDepositVaultState {
     /**
      * The list of Blank deposits
      */

@@ -1,14 +1,17 @@
-/* eslint-disable @typescript-eslint/no-non-null-assertion */
-import { ethers } from 'ethers';
 import Common from '@ethereumjs/common';
+import log from 'loglevel';
 import { BaseController } from '../infrastructure/BaseController';
+import { JSONRPCResponse } from '@blank/provider/types';
 import { Network, Networks, HARDFORKS } from '../utils/constants/networks';
-import { timeout } from '../utils/promises';
+import { SubcriptionResult } from '../utils/types/ethereum';
+import { ethers } from 'ethers';
+import { poll } from '@ethersproject/web';
 
 export enum NetworkEvents {
     NETWORK_CHANGE = 'NETWORK_CHANGE',
     USER_NETWORK_CHANGE = 'USER_NETWORK_CHANGE',
     PROVIDER_NETWORK_CHANGE = 'PROVIDER_NETWORK_CHANGE',
+    WS_PROVIDER_MESSAGE = 'WS_PROVIDER_MESSAGE',
 }
 
 export interface NetworkControllerState {
@@ -17,13 +20,17 @@ export interface NetworkControllerState {
     isNetworkChanging: boolean;
     isUserNetworkOnline: boolean;
     isProviderNetworkOnline: boolean;
+    isEIP1559Compatible: { [chainId in number]: boolean };
 }
+
+const WS_KEEP_ALIVE_CHECK = 1000;
 
 export default class NetworkController extends BaseController<NetworkControllerState> {
     public static readonly CURRENT_HARDFORK: string = 'london';
-    private provider:
-        | ethers.providers.InfuraProvider
-        | ethers.providers.StaticJsonRpcProvider;
+    private provider: ethers.providers.StaticJsonRpcProvider;
+    private _webSocketProvider: ethers.providers.WebSocketProvider | null;
+    private _wsProviderKeepAlive: NodeJS.Timer | null;
+    private _isWsEnabled: boolean;
 
     constructor(initialState: NetworkControllerState) {
         super(initialState);
@@ -34,16 +41,20 @@ export default class NetworkController extends BaseController<NetworkControllerS
 
         if (window && window.navigator) {
             window.addEventListener('online', () =>
-                this.handleUserNetworkChange()
+                this._handleUserNetworkChange()
             );
             window.addEventListener('offline', () =>
-                this.handleUserNetworkChange()
+                this._handleUserNetworkChange()
             );
-            this.handleUserNetworkChange();
+            this._handleUserNetworkChange();
         }
 
-        setInterval(() => this.updateProviderNetworkStatus(), 20000);
-        this.updateProviderNetworkStatus();
+        setInterval(() => this._updateProviderNetworkStatus(), 20000);
+        this._updateProviderNetworkStatus();
+
+        this._webSocketProvider = null;
+        this._wsProviderKeepAlive = null;
+        this._isWsEnabled = false;
     }
 
     /**
@@ -84,6 +95,20 @@ export default class NetworkController extends BaseController<NetworkControllerS
         // Uppercase the network name
         const key = this.selectedNetwork.toUpperCase();
         return this.networks[key];
+    }
+
+    /**
+     * Public setter for isWsEnabled
+     */
+    public set isWsEnabled(v: boolean) {
+        this._isWsEnabled = v;
+    }
+
+    /**
+     * Public getter for isWsEnabled
+     */
+    public get isWsEnabled(): boolean {
+        return this._isWsEnabled;
     }
 
     /**
@@ -175,12 +200,20 @@ export default class NetworkController extends BaseController<NetworkControllerS
 
     /**
      * It returns the Network Provider instance
-     * @returns {ethers.providers.InfuraProvider | ethers.providers.StaticJsonRpcProvider}
+     * @returns {ethers.providers.StaticJsonRpcProvider}
      */
-    public getProvider():
-        | ethers.providers.InfuraProvider
-        | ethers.providers.StaticJsonRpcProvider {
+    public getProvider(): ethers.providers.StaticJsonRpcProvider {
         return this.provider;
+    }
+
+    /**
+     * It returns the Ethereum mainnet Flashbots Provider instance
+     * @returns {ethers.providers.StaticJsonRpcProvider}
+     */
+    public getFlashbotsProvider(): ethers.providers.StaticJsonRpcProvider {
+        return new ethers.providers.StaticJsonRpcProvider(
+            'https://rpc.flashbots.net'
+        );
     }
 
     /**
@@ -188,11 +221,134 @@ export default class NetworkController extends BaseController<NetworkControllerS
      */
     public getProviderFromName = (
         networkName: string
-    ):
-        | ethers.providers.InfuraProvider
-        | ethers.providers.StaticJsonRpcProvider => {
+    ): ethers.providers.StaticJsonRpcProvider => {
         const network = this.searchNetworkByName(networkName);
         return new ethers.providers.StaticJsonRpcProvider(network.rpcUrls[0]);
+    };
+
+    /**
+     * Returns a websocket provider instance if this could be stablished.
+     *
+     * @param initialize If true will start a new instance if there isn't one running.
+     */
+    public getWebSocketProvider = async (
+        initialize = false
+    ): Promise<ethers.providers.WebSocketProvider | null> => {
+        if (this._webSocketProvider === null && initialize) {
+            return this._startWebSocketProvider();
+        }
+
+        return this._webSocketProvider;
+    };
+
+    /**
+     * Method to initialize a new web socket provider instance
+     */
+    private _startWebSocketProvider =
+        async (): Promise<ethers.providers.WebSocketProvider | null> => {
+            const network = this.searchNetworkByName(
+                this.store.getState().selectedNetwork
+            );
+
+            if (!network.wsUrls || !network.wsUrls.length) {
+                log.warn('No websocket url found for selected network');
+                return null;
+            }
+
+            this._isWsEnabled = true;
+
+            try {
+                const wsProvider = new ethers.providers.WebSocketProvider(
+                    network.wsUrls[0]
+                );
+
+                await this._isProviderReady(wsProvider);
+
+                // Get onMessage method
+                const wsMessage = wsProvider._websocket.onmessage;
+
+                // Override events
+                wsProvider._websocket.onmessage = (messageEvent: {
+                    data: string;
+                }) => this._onWsMessage(messageEvent, wsMessage);
+                wsProvider._websocket.onclose = () => this._onWsClose();
+
+                // Set keep alive
+                this._wsProviderKeepAlive = setInterval(() => {
+                    if (
+                        this._isWsEnabled &&
+                        (wsProvider._websocket.readyState === WebSocket.OPEN ||
+                            wsProvider._websocket.readyState ===
+                                WebSocket.CONNECTING)
+                    ) {
+                        wsProvider.detectNetwork();
+                        return;
+                    }
+
+                    wsProvider._websocket.close();
+                }, WS_KEEP_ALIVE_CHECK);
+
+                this._webSocketProvider = wsProvider;
+
+                log.debug('Websocket connected');
+
+                return wsProvider;
+            } catch (error) {
+                log.warn("Websocket provider couldn't be  initialized");
+                return null;
+            }
+        };
+
+    /**
+     * Triggered on new websocket message
+     */
+    private _onWsMessage = (
+        messageEvent: { data: string },
+        wsMessage: (messageEvent: { data: string }) => void
+    ) => {
+        const data = messageEvent.data;
+        const result = JSON.parse(data) as JSONRPCResponse & SubcriptionResult;
+        if (
+            (result.id && result.result) || // Regular rpc response
+            result.method === 'eth_subscription' // Subscription
+        ) {
+            this.emit(NetworkEvents.WS_PROVIDER_MESSAGE, result);
+        }
+
+        wsMessage(messageEvent);
+    };
+
+    /**
+     * Triggered on websocket termination.
+     * Tries to reconnect again.
+     */
+    private _onWsClose = () => {
+        log.debug('Websocket disconnected');
+
+        if (this._wsProviderKeepAlive) {
+            clearInterval(this._wsProviderKeepAlive);
+            this._wsProviderKeepAlive = null;
+            this._webSocketProvider = null;
+        }
+
+        if (this._isWsEnabled) {
+            log.debug('Reconnecting websocket');
+            this._startWebSocketProvider();
+        }
+    };
+
+    /**
+     * Terminates current webSocket connection
+     */
+    public terminateWebSocket = (): void => {
+        const wsProvider = this._webSocketProvider;
+        this._webSocketProvider = null;
+        this._isWsEnabled = false;
+
+        if (wsProvider) {
+            wsProvider.removeAllListeners();
+            wsProvider.destroy();
+        }
     };
 
     /**
@@ -205,8 +361,38 @@ export default class NetworkController extends BaseController<NetworkControllerS
     /**
      * It returns if current network is EIP1559 compatible.
      */
-    public async getEIP1559Compatibility(): Promise<boolean> {
-        return !!(await this.getLatestBlock()).baseFeePerGas;
+    public async getEIP1559Compatibility(
+        chainId: number = this.network.chainId,
+        forceUpdate?: boolean
+    ): Promise<boolean> {
+        let shouldFetchTheCurrentState = false;
+
+        if (!(chainId in this.getState().isEIP1559Compatible)) {
+            shouldFetchTheCurrentState = true;
+        } else {
+            if (this.getState().isEIP1559Compatible[chainId] === undefined) {
+                shouldFetchTheCurrentState = true;
+            } else {
+                if (
+                    forceUpdate &&
+                    !this.getState().isEIP1559Compatible[chainId]
+                ) {
+                    shouldFetchTheCurrentState = true;
+                }
+            }
+        }
+
+        if (shouldFetchTheCurrentState) {
+            const baseFeePerGas = (await this.getLatestBlock()).baseFeePerGas;
+            this.store.updateState({
+                isEIP1559Compatible: {
+                    ...this.getState().isEIP1559Compatible,
+                    [chainId]: !!baseFeePerGas,
+                },
+            });
+        }
+
+        return this.getState().isEIP1559Compatible[chainId];
     }
 
     /**
@@ -241,9 +427,7 @@ export default class NetworkController extends BaseController<NetworkControllerS
      * @param newProvider The provider for the selected nework
      */
     private _updateListeners(
-        newProvider:
-            | ethers.providers.InfuraProvider
-            | ethers.providers.StaticJsonRpcProvider
+        newProvider: ethers.providers.StaticJsonRpcProvider
     ) {
         const listeners = this.getProvider()._events.map((ev) => ({
             name: ev.event,
@@ -281,7 +465,8 @@ export default class NetworkController extends BaseController<NetworkControllerS
 
             // Instantiate provider and wait until it's ready
             const newNetworkProvider = this.getProviderFromName(network.name);
-            await timeout(newNetworkProvider.ready, 10000); // Time out after 10 seconds
+
+            await this._isProviderReady(newNetworkProvider); // Time out after 10 seconds
 
             // Update provider listeners
             this._updateListeners(newNetworkProvider);
@@ -289,10 +474,20 @@ export default class NetworkController extends BaseController<NetworkControllerS
             // Update provider reference
             this.provider = newNetworkProvider;
 
+            // Close web socket connection
+            this.terminateWebSocket();
+
             // Update selected network
             this.store.updateState({
                 selectedNetwork: networkName,
-                isNetworkChanging: false, // Set the isNetworkChanging flag to false
+            });
+
+            // check for eip1559 compatibility
+            await this.getEIP1559Compatibility(network.chainId, true);
+
+            // Set the isNetworkChanging flag to false
+            this.store.updateState({
+                isNetworkChanging: false,
             });
 
             // Emit NETWORK_CHANGE event
@@ -336,14 +531,14 @@ export default class NetworkController extends BaseController<NetworkControllerS
         const { name, chainId } = this.network;
 
         // this only matters, if a hardfork adds new transaction types
-        const hardfork = (await this.getEIP1559Compatibility())
+        const hardfork = (await this.getEIP1559Compatibility(chainId))
             ? HARDFORKS.LONDON
             : HARDFORKS.BERLIN;
 
         return Common.custom({ name, chainId }, { hardfork });
     }
 
-    private handleUserNetworkChange() {
+    private _handleUserNetworkChange() {
         const newValue = navigator.onLine;
 
         if (this.getState().isUserNetworkOnline == newValue) return;
@@ -352,8 +547,8 @@ export default class NetworkController extends BaseController<NetworkControllerS
         this.emit(NetworkEvents.USER_NETWORK_CHANGE, newValue);
     }
 
-    private updateProviderNetworkStatus() {
-        timeout(this.provider.ready, 10000)
+    private _updateProviderNetworkStatus() {
+        this._isProviderReady()
             .then(() => {
                 return Promise.resolve(true);
             })
@@ -369,5 +564,30 @@ export default class NetworkController extends BaseController<NetworkControllerS
                 });
                 this.emit(NetworkEvents.PROVIDER_NETWORK_CHANGE, newStatus);
             });
+    }
+
+    private _isProviderReady(
+        provider:
+            | ethers.providers.StaticJsonRpcProvider
+            | ethers.providers.WebSocketProvider = this.provider
+    ): Promise<ethers.providers.Network | undefined> {
+        return poll(
+            async () => {
+                try {
+                    const network = await provider.detectNetwork();
+                    return network;
+                } catch (error) {
+                    if (
+                        error.code === 'NETWORK_ERROR' &&
+                        error.event === 'noNetwork'
+                    ) {
+                        return undefined;
+                    }
+
+                    throw error;
+                }
+            },
+            { timeout: 10000 }
+        );
     }
 }

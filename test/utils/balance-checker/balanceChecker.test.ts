@@ -129,7 +129,7 @@ describe('BalanceChecker', () => {
                 100: '', // xdai
                 50: '', // xdc
                 5: '0x906F63676923374a7B9781BcC1B1532488d45a7a', // goerli
-                3: '0x8D9708f3F514206486D7E988533f770a16d074a7', // ropsten
+                3: '0xb8e671734ce5c8d7dfbbea5574fa4cf39f7a54a4', // ropsten
                 42: '0x55ABBa8d669D60A10c104CC493ec5ef389EC92bb', // kovan
                 4: '0x3183B673f4816C94BeF53958BaF93C671B7F8Cf2', // rinkeby
                 97: '0x2352c63A83f9Fd126af8676146721Fa00924d7e4', // bsc testnet
@@ -262,12 +262,16 @@ describe('BalanceChecker', () => {
                 balances: (
                     addresses: string[],
                     _ethBalance: string[]
-                ): BigNumber[] => [
-                    BigNumber.from('1'),
-                    BigNumber.from('2'),
-                    BigNumber.from('2'),
-                    BigNumber.from('3'),
-                ],
+                ): Promise<BigNumber[]> => {
+                    return new Promise<BigNumber[]>((resolve) => {
+                        resolve([
+                            BigNumber.from('1'),
+                            BigNumber.from('2'),
+                            BigNumber.from('2'),
+                            BigNumber.from('3'),
+                        ]);
+                    });
+                },
             } as any);
 
             const balances = await balanceChecker.getAddressesBalances(
@@ -297,7 +301,11 @@ describe('BalanceChecker', () => {
                 balances: (
                     addresses: string[],
                     _ethBalance: string[]
-                ): BigNumber[] => [BigNumber.from('1'), BigNumber.from('2')],
+                ): Promise<BigNumber[]> => {
+                    return new Promise<BigNumber[]>((resolve) => {
+                        resolve([BigNumber.from('1'), BigNumber.from('2')]);
+                    });
+                },
             } as any);
 
             const balances = await balanceChecker.getAddressBalances(

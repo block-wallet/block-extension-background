@@ -38,6 +38,10 @@ import {
     TransactionControllerState,
     TransactionVolatileControllerState,
 } from '@blank/background/controllers/transactions/TransactionController';
+import {
+    BlockFetchControllerState,
+    BLOCKS_TO_WAIT_BEFORE_CHECHKING_FOR_CHAIN_SUPPORT,
+} from '../../controllers/BlockFetchController';
 
 export type BlankAppState = {
     AccountTrackerController: AccountTrackerState;
@@ -55,6 +59,7 @@ export type BlankAppState = {
     PermissionsController: PermissionsControllerState;
     NetworkController: NetworkControllerState;
     AddressBookController: AddressBookControllerMemState;
+    BlockFetchController: BlockFetchControllerState;
 };
 
 export type BlankAppUIState = {
@@ -82,6 +87,17 @@ export type BlankAppStoreConfig<S> = {
 };
 
 const initialState: BlankAppState = {
+    BlockFetchController: {
+        blockFetchData: {
+            1: {
+                offChainSupport: false,
+                checkingOffChainSupport: false,
+                currentBlockNumber: 0,
+                lastBlockOffChainChecked:
+                    -1 * BLOCKS_TO_WAIT_BEFORE_CHECHKING_FOR_CHAIN_SUPPORT,
+            },
+        },
+    },
     AddressBookController: {
         addressBook: {} as AddressBook,
         recentAddresses: {} as AddressBook,

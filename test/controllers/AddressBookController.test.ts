@@ -30,6 +30,7 @@ import { ExchangeRatesController } from '@blank/background/controllers/ExchangeR
 import { TornadoEventsService } from '@blank/background/controllers/blank-deposit/tornado/TornadoEventsService';
 import TransactionController from '@blank/background/controllers/transactions/TransactionController';
 import KeyringControllerDerivated from '@blank/background/controllers/KeyringControllerDerivated';
+import BlockFetchController from '@blank/background/controllers/BlockFetchController';
 
 describe('Address book controller implementation', function () {
     const accounts = {
@@ -57,6 +58,7 @@ describe('Address book controller implementation', function () {
     let incomingTransactionController: IncomingTransactionController;
     let accountTrackerController: AccountTrackerController;
     let keyringController: KeyringControllerDerivated;
+    let blockFetchController: BlockFetchController;
     let blockUpdatesController: BlockUpdatesController;
     let exchangeRatesController: ExchangeRatesController;
 
@@ -115,6 +117,10 @@ describe('Address book controller implementation', function () {
             { txHistoryLimit: 40 }
         );
 
+        blockFetchController = new BlockFetchController(networkController, {
+            blockFetchData: {},
+        });
+
         blockUpdatesController = new BlockUpdatesController(
             networkController,
             accountTrackerController,
@@ -122,6 +128,7 @@ describe('Address book controller implementation', function () {
             exchangeRatesController,
             incomingTransactionController,
             transactionController,
+            blockFetchController,
             { blockData: {} }
         );
 

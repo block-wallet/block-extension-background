@@ -30,6 +30,7 @@ import { ExchangeRatesController } from '@blank/background/controllers/ExchangeR
 import { IncomingTransactionController } from '@blank/background/controllers/IncomingTransactionController';
 import TransactionController from '@blank/background/controllers/transactions/TransactionController';
 import KeyringControllerDerivated from '@blank/background/controllers/KeyringControllerDerivated';
+import BlockFetchController from '@blank/background/controllers/BlockFetchController';
 
 describe('AccountTracker controller implementation', function () {
     const accounts = {
@@ -54,6 +55,7 @@ describe('AccountTracker controller implementation', function () {
     let tokenOperationsController: TokenOperationsController;
     let permissionsController: PermissionsController;
     let gasPricesController: GasPricesController;
+    let blockFetchController: BlockFetchController;
     let blockUpdatesController: BlockUpdatesController;
     let exchangeRatesController: ExchangeRatesController;
     let incomingTransactionController: IncomingTransactionController;
@@ -138,6 +140,10 @@ describe('AccountTracker controller implementation', function () {
             { incomingTransactions: {} }
         );
 
+        blockFetchController = new BlockFetchController(networkController, {
+            blockFetchData: {},
+        });
+
         blockUpdatesController = new BlockUpdatesController(
             networkController,
             accountTrackerController,
@@ -145,6 +151,7 @@ describe('AccountTracker controller implementation', function () {
             exchangeRatesController,
             incomingTransactionController,
             transactionController,
+            blockFetchController,
             { blockData: {} }
         );
     });

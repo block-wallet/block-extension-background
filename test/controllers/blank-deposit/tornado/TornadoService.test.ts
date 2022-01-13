@@ -55,6 +55,7 @@ import {
     Deposit,
     Withdrawal,
 } from '@blank/background/controllers/blank-deposit/tornado/stores/ITornadoEventsDB';
+import BlockFetchController from '@blank/background/controllers/BlockFetchController';
 
 describe('TornadoService', () => {
     // Re-mock IndexedDb on each test
@@ -89,6 +90,7 @@ describe('TornadoService', () => {
     let tokenOperationsController: TokenOperationsController;
     let permissionsController: PermissionsController;
     let gasPricesController: GasPricesController;
+    let blockFetchController: BlockFetchController;
     let blockUpdatesController: BlockUpdatesController;
     let exchangeRatesController: ExchangeRatesController;
     let incomingTransactionController: IncomingTransactionController;
@@ -175,6 +177,10 @@ describe('TornadoService', () => {
             { txHistoryLimit: 40 }
         );
 
+        blockFetchController = new BlockFetchController(networkController, {
+            blockFetchData: {},
+        });
+
         blockUpdatesController = new BlockUpdatesController(
             networkController,
             accountTrackerController,
@@ -182,6 +188,7 @@ describe('TornadoService', () => {
             exchangeRatesController,
             incomingTransactionController,
             transactionController,
+            blockFetchController,
             { blockData: {} }
         );
 

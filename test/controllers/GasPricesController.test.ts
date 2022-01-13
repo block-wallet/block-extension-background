@@ -11,7 +11,7 @@ import sinon from 'sinon';
 import { getNetworkControllerInstance } from '../mocks/mock-network-instance';
 import { Network } from '@blank/background/utils/constants/networks';
 import { it } from 'mocha';
-import { Block, FeeData } from '@ethersproject/abstract-provider';
+import { Block } from '@ethersproject/abstract-provider';
 import axios from 'axios';
 
 describe('GasPrices Controller', () => {

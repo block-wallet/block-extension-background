@@ -13,6 +13,7 @@ export enum ProviderError {
     TRANSACTION_REJECTED = 'TRANSACTION_REJECTED',
     UNAUTHORIZED = 'UNAUTHORIZED',
     UNSUPPORTED_METHOD = 'UNSUPPORTED_METHOD',
+    UNSUPPORTED_SUBSCRIPTION_TYPE = 'UNSUPPORTED_SUBSCRIPTION_TYPE',
     USER_REJECTED_REQUEST = 'USER_REJECTED_REQUEST',
 }
 
@@ -96,7 +97,13 @@ export interface GetPermissionResponse {
 export enum SubscriptionType {
     logs = 'logs',
     newHeads = 'newHeads',
+    /**
+     * @unsupported
+     */
     newPendingTransactions = 'newPendingTransactions',
+    /**
+     * @unsupported
+     */
     syncing = 'syncing',
 }
 
@@ -115,12 +122,36 @@ export type SubscriptionParams = [
     SubscriptionParam[SubscriptionType]
 ];
 
-export interface SubcriptionResult {
+export interface SubscriptionResult {
     method: 'eth_subscription';
     params: {
         subscription: string; // Subscription id
         result: Record<string, unknown>; // Subscription data
     };
+}
+
+/**
+ * Subscription object.
+ * It's created when a dApp ask for newBlocks or logs.
+ */
+export interface Subscription {
+    id: string;
+    portId: string;
+    type: SubscriptionType;
+
+    /**
+     * Callback method that is triggered every
+     * block update.
+     *
+     * @param chainId The current network chainId
+     * @param previousBlockNumber The previous update block number
+     * @param newBlockNumber The new update block number
+     */
+    notification(
+        chainId: number,
+        previousBlockNumber: number,
+        newBlockNumber: number
+    ): Promise<void>;
 }
 
 // EIP-747
@@ -352,10 +383,29 @@ export enum JSONRPCMethod {
     eth_unsubscribe = 'eth_unsubscribe',
 }
 
+export interface Block {
+    parentHash: string;
+    sha3Uncles: string;
+    miner: string;
+    stateRoot: string;
+    transactionsRoot: string;
+    receiptsRoot: string;
+    logsBloom: string;
+    difficulty: string;
+    number: string;
+    gasLimit: string;
+    gasUsed: string;
+    timestamp: string;
+    extraData: string;
+    mixHash: string;
+    nonce: string;
+    baseFeePerGas: string;
+    hash: string;
+}
+
 // External provider methods
 
 export const ExtProviderMethods = [
-    JSONRPCMethod.eth_blockNumber,
     JSONRPCMethod.eth_call,
     JSONRPCMethod.eth_estimateGas,
     JSONRPCMethod.eth_feeHistory,

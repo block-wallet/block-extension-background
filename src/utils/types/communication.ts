@@ -12,7 +12,10 @@ import { BigNumber } from '@ethersproject/bignumber';
 import { AccountInfo } from '../../controllers/AccountTrackerController';
 import { GasPriceValue } from '../../controllers/transactions/TransactionController';
 import { ITokens, Token } from '../../controllers/erc-20/Token';
-import { TransactionAdvancedData, TransactionMeta } from '../../controllers/transactions/utils/types';
+import {
+    TransactionAdvancedData,
+    TransactionMeta,
+} from '../../controllers/transactions/utils/types';
 import { ImportStrategy, ImportArguments } from '../account';
 import {
     QuoteParameters,
@@ -139,7 +142,7 @@ enum TRANSACTION {
     SEND_ETHER = 'SEND_ETHER',
     CANCEL_TRANSACTION = 'CANCEL_TRANSACTION',
     SPEED_UP_TRANSACTION = 'SPEED_UP_TRANSACTION',
-    GET_NEXT_NONCE = "GET_NEXT_NONCE"
+    GET_NEXT_NONCE = 'GET_NEXT_NONCE',
 }
 
 enum WALLET {
@@ -149,6 +152,8 @@ enum WALLET {
     REQUEST_SEED_PHRASE = 'REQUEST_SEED_PHRASE',
     SETUP_COMPLETE = 'SETUP_COMPLETE',
     RESET = 'RESET',
+    DISMISS_WELCOME_MESSAGE = 'DISMISS_WELCOME_MESSAGE',
+    DISMISS_LATESTS_NEWS_MESSAGE = 'DISMISS_LATESTS_NEWS_MESSAGE',
 }
 
 enum TOKEN {
@@ -340,10 +345,7 @@ export interface RequestSignatures {
         RequestSpeedUpTransaction,
         void
     ];
-    [Messages.TRANSACTION.GET_NEXT_NONCE]: [
-        RequestNextNonce,
-        number
-    ];
+    [Messages.TRANSACTION.GET_NEXT_NONCE]: [RequestNextNonce, number];
     [Messages.WALLET.CREATE]: [RequestWalletCreate, void];
     [Messages.WALLET.IMPORT]: [RequestWalletImport, boolean];
     [Messages.WALLET.VERIFY_SEED_PHRASE]: [RequestVerifySeedPhrase, boolean];
@@ -383,6 +385,7 @@ export interface RequestSignatures {
         RequestAddressBookGetRecentAddresses,
         NetworkAddressBook
     ];
+    [Messages.WALLET.DISMISS_WELCOME_MESSAGE]: [DismissWelcomeMessage, boolean];
 }
 
 export type MessageTypes = keyof RequestSignatures;
@@ -604,7 +607,7 @@ export interface RequestWalletCreate {
 export interface RequestSeedPhrase {
     password: string;
 }
-export interface RequestCompleteSetup { }
+export interface RequestCompleteSetup {}
 
 export interface RequestWalletImport {
     password: string;
@@ -748,7 +751,7 @@ export interface RequestRejectTransaction {
     transactionId: string;
 }
 
-export interface RequestAddressBookClear { }
+export interface RequestAddressBookClear {}
 
 export interface RequestAddressBookDelete {
     address: string;
@@ -760,7 +763,7 @@ export interface RequestAddressBookSet {
     note?: string;
 }
 
-export interface RequestAddressBookGet { }
+export interface RequestAddressBookGet {}
 export interface RequestAddressBookGetByAddress {
     address: string;
 }
@@ -828,6 +831,8 @@ export interface WindowTransportResponseMessage
     extends TransportResponseMessage<EXTERNAL> {
     origin: Origin;
 }
+
+export interface DismissWelcomeMessage {}
 
 export enum Origin {
     BACKGROUND = 'BLANK_BACKGROUND',

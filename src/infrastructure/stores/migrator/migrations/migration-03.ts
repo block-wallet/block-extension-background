@@ -10,7 +10,7 @@ export default {
         const { availableNetworks } = persistedState.NetworkController;
         const updatedNetworks = { ...availableNetworks };
 
-        const networkWsUrls: { [x: string]: Network['wsUrls'] } = {
+        const networkWsUrls: { [x: string]: string[] } = {
             MAINNET: ['wss://mainnet-node.goblank.io/ws'],
             ARBITRUM: ['wss://arb1.arbitrum.io/ws'],
             OPTIMISM: ['wss://ws-mainnet.optimism.io'],
@@ -26,7 +26,8 @@ export default {
                 updatedNetworks[network] = {
                     ...updatedNetworks[network],
                     wsUrls: networkWsUrls[network],
-                };
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                } as any;
             }
         }
 

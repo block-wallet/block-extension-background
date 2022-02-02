@@ -1,7 +1,9 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /* eslint-disable @typescript-eslint/no-non-null-assertion */
 /* eslint-disable @typescript-eslint/no-var-requires */
-import BlankController from './controllers/BlankController';
+import BlankController, {
+    BlankControllerEvents,
+} from './controllers/BlankController';
 import BlankStorageStore from './infrastructure/stores/BlankStorageStore';
 import initialState, { BlankAppState } from './utils/constants/initialState';
 import reconcileState from './infrastructure/stores/migrator/reconcileState';
@@ -81,6 +83,14 @@ const getDevTools = () => {
 };
 
 /**
+ * updates the extension badge
+ */
+const updateExtensionBadge = (label: string) => {
+    chrome.browserAction.setBadgeText({ text: label });
+    chrome.browserAction.setBadgeBackgroundColor({ color: '#1673FF' }); // BlockWallet primary color
+};
+
+/**
  * Initializes blank wallet
  *
  */
@@ -97,6 +107,24 @@ const initBlankWallet = async () => {
         blankStateStore,
         devTools,
     });
+
+    // Clear badge on init
+    updateExtensionBadge('');
+
+    blankController.on(
+        BlankControllerEvents.EXTERNAL_REQUESTS_AMOUNT_CHANGE,
+        (dappRequestsAmount: number) => {
+            let label = '';
+
+            if (dappRequestsAmount > 10) {
+                label = '10+';
+            } else if (dappRequestsAmount > 0) {
+                label = String(dappRequestsAmount);
+            }
+
+            updateExtensionBadge(label);
+        }
+    );
 
     // Setup connection
     chrome.runtime.onConnect.addListener((port) => {

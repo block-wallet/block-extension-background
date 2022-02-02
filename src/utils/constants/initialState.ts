@@ -123,6 +123,7 @@ const initialState: BlankAppState = {
     },
     PreferencesController: {
         selectedAddress: '',
+        showWelcomeMessage: false,
         localeInfo: 'en-US',
         nativeCurrency: 'usd',
         showTestNetworks: false,

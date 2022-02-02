@@ -8,7 +8,7 @@ import { Network } from '../utils/constants/networks';
 import { FeeData } from '@ethersproject/abstract-provider';
 import axios from 'axios';
 
-const CHAIN_FEE_DATA_SERVICE_URL = 'https://chain-fee.goblank.io/v1';
+const CHAIN_FEE_DATA_SERVICE_URL = 'https://chain-fee.blockwallet.io/v1';
 const BLOCKS_TO_WAIT_BEFORE_CHECHKING_FOR_CHAIN_SUPPORT = 100;
 
 export enum GasPriceLevelsEnum {

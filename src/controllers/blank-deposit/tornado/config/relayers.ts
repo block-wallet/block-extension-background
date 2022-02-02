@@ -1,8 +1,8 @@
 import { AvailableNetworks } from '../../types';
 
 const relayers: { [network in AvailableNetworks]: string } = {
-    goerli: 'goerli-relayer.goblank.io',
-    mainnet: 'mainnet-relayer.goblank.io',
+    goerli: 'goerli-relayer.blockwallet.io',
+    mainnet: 'mainnet-relayer.blockwallet.io',
 };
 
 export default relayers;

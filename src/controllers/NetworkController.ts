@@ -1,9 +1,6 @@
 import Common from '@ethereumjs/common';
-import log from 'loglevel';
 import { BaseController } from '../infrastructure/BaseController';
-import { JSONRPCResponse } from '@blank/provider/types';
 import { Network, Networks, HARDFORKS } from '../utils/constants/networks';
-import { SubcriptionResult } from '../utils/types/ethereum';
 import { ethers } from 'ethers';
 import { poll } from '@ethersproject/web';
 
@@ -11,7 +8,6 @@ export enum NetworkEvents {
     NETWORK_CHANGE = 'NETWORK_CHANGE',
     USER_NETWORK_CHANGE = 'USER_NETWORK_CHANGE',
     PROVIDER_NETWORK_CHANGE = 'PROVIDER_NETWORK_CHANGE',
-    WS_PROVIDER_MESSAGE = 'WS_PROVIDER_MESSAGE',
 }
 
 export interface NetworkControllerState {
@@ -23,14 +19,9 @@ export interface NetworkControllerState {
     isEIP1559Compatible: { [chainId in number]: boolean };
 }
 
-const WS_KEEP_ALIVE_CHECK = 1000;
-
 export default class NetworkController extends BaseController<NetworkControllerState> {
     public static readonly CURRENT_HARDFORK: string = 'london';
     private provider: ethers.providers.StaticJsonRpcProvider;
-    private _webSocketProvider: ethers.providers.WebSocketProvider | null;
-    private _wsProviderKeepAlive: NodeJS.Timer | null;
-    private _isWsEnabled: boolean;
 
     constructor(initialState: NetworkControllerState) {
         super(initialState);
@@ -51,10 +42,6 @@ export default class NetworkController extends BaseController<NetworkControllerS
 
         setInterval(() => this._updateProviderNetworkStatus(), 20000);
         this._updateProviderNetworkStatus();
-
-        this._webSocketProvider = null;
-        this._wsProviderKeepAlive = null;
-        this._isWsEnabled = false;
     }
 
     /**
@@ -95,20 +82,6 @@ export default class NetworkController extends BaseController<NetworkControllerS
         // Uppercase the network name
         const key = this.selectedNetwork.toUpperCase();
         return this.networks[key];
-    }
-
-    /**
-     * Public setter for isWsEnabled
-     */
-    public set isWsEnabled(v: boolean) {
-        this._isWsEnabled = v;
-    }
-
-    /**
-     * Public getter for isWsEnabled
-     */
-    public get isWsEnabled(): boolean {
-        return this._isWsEnabled;
     }
 
     /**
@@ -224,131 +197,6 @@ export default class NetworkController extends BaseController<NetworkControllerS
     ): ethers.providers.StaticJsonRpcProvider => {
         const network = this.searchNetworkByName(networkName);
         return new ethers.providers.StaticJsonRpcProvider(network.rpcUrls[0]);
-    };
-
-    /**
-     * Returns a websocket provider instance if this could be stablished.
-     *
-     * @param initialize If true will start a new instance if there isn't one running.
-     */
-    public getWebSocketProvider = async (
-        initialize = false
-    ): Promise<ethers.providers.WebSocketProvider | null> => {
-        if (this._webSocketProvider === null && initialize) {
-            return this._startWebSocketProvider();
-        }
-
-        return this._webSocketProvider;
-    };
-
-    /**
-     * Method to initialize a new web socket provider instance
-     */
-    private _startWebSocketProvider =
-        async (): Promise<ethers.providers.WebSocketProvider | null> => {
-            const network = this.searchNetworkByName(
-                this.store.getState().selectedNetwork
-            );
-
-            if (!network.wsUrls || !network.wsUrls.length) {
-                log.warn('No websocket url found for selected network');
-                return null;
-            }
-
-            this._isWsEnabled = true;
-
-            try {
-                const wsProvider = new ethers.providers.WebSocketProvider(
-                    network.wsUrls[0]
-                );
-
-                await this._isProviderReady(wsProvider);
-
-                // Get onMessage method
-                const wsMessage = wsProvider._websocket.onmessage;
-
-                // Override events
-                wsProvider._websocket.onmessage = (messageEvent: {
-                    data: string;
-                }) => this._onWsMessage(messageEvent, wsMessage);
-                wsProvider._websocket.onclose = () => this._onWsClose();
-
-                // Set keep alive
-                this._wsProviderKeepAlive = setInterval(() => {
-                    if (
-                        this._isWsEnabled &&
-                        (wsProvider._websocket.readyState === WebSocket.OPEN ||
-                            wsProvider._websocket.readyState ===
-                                WebSocket.CONNECTING)
-                    ) {
-                        wsProvider.detectNetwork();
-                        return;
-                    }
-
-                    wsProvider._websocket.close();
-                }, WS_KEEP_ALIVE_CHECK);
-
-                this._webSocketProvider = wsProvider;
-
-                log.debug('Websocket connected');
-
-                return wsProvider;
-            } catch (error) {
-                log.warn("Websocket provider couldn't be  initialized");
-                return null;
-            }
-        };
-
-    /**
-     * Triggered on new websocket message
-     */
-    private _onWsMessage = (
-        messageEvent: { data: string },
-        wsMessage: (messageEvent: { data: string }) => void
-    ) => {
-        const data = messageEvent.data;
-        const result = JSON.parse(data) as JSONRPCResponse & SubcriptionResult;
-        if (
-            (result.id && result.result) || // Regular rpc response
-            result.method === 'eth_subscription' // Subscription
-        ) {
-            this.emit(NetworkEvents.WS_PROVIDER_MESSAGE, result);
-        }
-
-        wsMessage(messageEvent);
-    };
-
-    /**
-     * Triggered on websocket termination.
-     * Tries to reconnect again.
-     */
-    private _onWsClose = () => {
-        log.debug('Websocket disconnected');
-
-        if (this._wsProviderKeepAlive) {
-            clearInterval(this._wsProviderKeepAlive);
-            this._wsProviderKeepAlive = null;
-            this._webSocketProvider = null;
-        }
-
-        if (this._isWsEnabled) {
-            log.debug('Reconnecting websocket');
-            this._startWebSocketProvider();
-        }
-    };
-
-    /**
-     * Terminates current webSocket connection
-     */
-    public terminateWebSocket = (): void => {
-        const wsProvider = this._webSocketProvider;
-        this._webSocketProvider = null;
-        this._isWsEnabled = false;
-
-        if (wsProvider) {
-            wsProvider.removeAllListeners();
-            wsProvider.destroy();
-        }
     };
 
     /**
@@ -474,9 +322,6 @@ export default class NetworkController extends BaseController<NetworkControllerS
             // Update provider reference
             this.provider = newNetworkProvider;
 
-            // Close web socket connection
-            this.terminateWebSocket();
-
             // Update selected network
             this.store.updateState({
                 selectedNetwork: networkName,
@@ -567,9 +412,7 @@ export default class NetworkController extends BaseController<NetworkControllerS
     }
 
     private _isProviderReady(
-        provider:
-            | ethers.providers.StaticJsonRpcProvider
-            | ethers.providers.WebSocketProvider = this.provider
+        provider: ethers.providers.StaticJsonRpcProvider = this.provider
     ): Promise<ethers.providers.Network | undefined> {
         return poll(
             async () => {

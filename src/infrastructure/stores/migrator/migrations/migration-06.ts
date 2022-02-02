@@ -11,7 +11,7 @@ export default {
 
         updatedNetworks.POLYGON = {
             ...updatedNetworks.POLYGON,
-            rpcUrls: [`https://polygon-node.goblank.io/`],
+            rpcUrls: [`https://polygon-node.blockwallet.io/`],
         };
 
         return {

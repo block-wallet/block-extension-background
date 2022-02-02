@@ -11,14 +11,14 @@ export default {
         const updatedNetworks = { ...availableNetworks };
 
         const networkWsUrls: { [x: string]: Network['wsUrls'] } = {
-            MAINNET: ['wss://mainnet-node.goblank.io/ws'],
+            MAINNET: ['wss://mainnet-node.blockwallet.io/ws'],
             ARBITRUM: ['wss://arb1.arbitrum.io/ws'],
             OPTIMISM: ['wss://ws-mainnet.optimism.io'],
             POLYGON: ['wss://ws-matic-mainnet.chainstacklabs.com'],
-            GOERLI: ['wss://goerli-node.goblank.io/ws'],
-            ROPSTEN: ['wss://ropsten-node.goblank.io/ws'],
-            KOVAN: ['wss://kovan-node.goblank.io/ws'],
-            RINKEBY: ['wss://rinkeby-node.goblank.io/ws'],
+            GOERLI: ['wss://goerli-node.blockwallet.io/ws'],
+            ROPSTEN: ['wss://ropsten-node.blockwallet.io/ws'],
+            KOVAN: ['wss://kovan-node.blockwallet.io/ws'],
+            RINKEBY: ['wss://rinkeby-node.blockwallet.io/ws'],
         };
 
         for (const network in updatedNetworks) {

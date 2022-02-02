@@ -981,7 +981,7 @@ describe('TornadoService', () => {
             deposit,
             '0xabc',
             18,
-            'goerli.goblank.io'
+            'goerli.blockwallet.io'
         );
         pending.chainId = 5;
 

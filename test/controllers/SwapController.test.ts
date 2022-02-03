@@ -78,6 +78,7 @@ describe.skip('Swap Controller', () => {
         preferencesController,
         permissionsController,
         gasPricesController,
+        tokenController,
         {
             transactions: [],
         },

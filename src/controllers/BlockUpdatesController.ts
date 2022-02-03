@@ -16,7 +16,8 @@ export interface BlockUpdatesControllerState {
 }
 
 export enum BlockUpdatesEvents {
-    SUBSCRIPTION_UPDATE = 'SUBSCRIPTION_UPDATE',
+    CONTROLLER_UPDATE_SUBSCRIPTION = 'CONTROLLER_UPDATE_SUBSCRIPTION',
+    BLOCK_UPDATES_SUBSCRIPTION = 'SUBSCRIBE_TO_BLOCK_UPDATES',
 }
 
 export default class BlockUpdatesController extends BaseController<BlockUpdatesControllerState> {
@@ -60,7 +61,7 @@ export default class BlockUpdatesController extends BaseController<BlockUpdatesC
          * extension is unlocked and have active subscriptions, or if there
          * is any transaction pending of confirmation.
          */
-        this.on(BlockUpdatesEvents.SUBSCRIPTION_UPDATE, () => {
+        this.on(BlockUpdatesEvents.CONTROLLER_UPDATE_SUBSCRIPTION, () => {
             if (this.shouldQuery || this.shouldQueryTransactions) {
                 this._blockFetchController.addNewOnBlockListener(
                     this._networkController.network.chainId,
@@ -112,7 +113,7 @@ export default class BlockUpdatesController extends BaseController<BlockUpdatesC
                 ({ verifiedOnBlockchain }) => !verifiedOnBlockchain
             );
 
-        this.emit(BlockUpdatesEvents.SUBSCRIPTION_UPDATE);
+        this.emit(BlockUpdatesEvents.CONTROLLER_UPDATE_SUBSCRIPTION);
     };
 
     /**
@@ -129,7 +130,7 @@ export default class BlockUpdatesController extends BaseController<BlockUpdatesC
         subscriptions: number
     ): void {
         this.shouldQuery = isUnlocked && subscriptions > 0;
-        this.emit(BlockUpdatesEvents.SUBSCRIPTION_UPDATE);
+        this.emit(BlockUpdatesEvents.CONTROLLER_UPDATE_SUBSCRIPTION);
     }
 
     /**
@@ -208,6 +209,14 @@ export default class BlockUpdatesController extends BaseController<BlockUpdatesC
                     if (this.shouldQueryTransactions) {
                         this._transactionController.update(blockNumber);
                     }
+
+                    // Emit new block subscription
+                    this.emit(
+                        BlockUpdatesEvents.BLOCK_UPDATES_SUBSCRIPTION,
+                        chainId, // Update chainId
+                        currentBlock, // Old block number
+                        blockNumber // New block number
+                    );
                 }
             }
         } catch (error) {

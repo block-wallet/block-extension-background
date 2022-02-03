@@ -6,7 +6,6 @@ import {
     TransactionController,
     TransactionGasEstimation,
 } from '../../transactions/TransactionController';
-
 import {
     MetaType,
     TransactionAdvancedData,
@@ -30,10 +29,12 @@ import * as transactionUtils from './../../transactions/utils/utils';
 import { INITIAL_NETWORKS } from '../../../utils/constants/networks';
 import { bnGreaterThanZero } from '../../../utils/bnUtils';
 import { v4 as uuid } from 'uuid';
+import { TransactionDescription } from 'ethers/lib/utils';
+import log from 'loglevel';
 
 const GAS_LIMIT = 2e6;
 
-export interface PopulatedTransactionParams { }
+export interface PopulatedTransactionParams {}
 
 export interface TransactionFeeData {
     maxFeePerGas?: BigNumber;
@@ -95,6 +96,24 @@ export interface ISignedTransaction {
      * @param {string} transactionId the id of the transaction to get the result.
      */
     getTransactionResult(transactionId: string): Promise<any>;
+
+    /**
+     * Returns the arguments of an ERC20 contract call, formatted as object.
+     * If sent, transaction category will be validated.
+     *
+     * @param callData Transaction data
+     * @param category Transaction category
+     */
+    decodeInputData(
+        callData: string,
+        category?: TransactionCategories
+    ): Record<string, unknown>;
+
+    /**
+     * Returns the validated arguments of a transaction call data
+     * @param callData Transaction data
+     */
+    getDataArguments(callData: string): any;
 }
 
 /**
@@ -112,7 +131,8 @@ export interface SignedTransactionProps extends TokenTransactionProps {
  */
 export abstract class SignedTransaction
     extends TokenTransactionController
-    implements ISignedTransaction {
+    implements ISignedTransaction
+{
     protected readonly _transactionController: TransactionController;
     protected readonly _preferencesController: PreferencesController;
     private readonly _fallbackTransactionGasLimit?: BigNumber;
@@ -233,13 +253,12 @@ export abstract class SignedTransaction
                     ...populatedTransaction,
                     from: this._preferencesController.getSelectedAddress(),
                     ...feeData,
-                    nonce: advancedData?.customNonce
+                    nonce: advancedData?.customNonce,
                 },
-                'blank'
+                'blank',
+                false,
+                transactionCategory
             );
-
-        meta.transactionCategory = transactionCategory;
-        this._transactionController.updateTransaction(meta);
 
         return meta;
     }
@@ -301,4 +320,90 @@ export abstract class SignedTransaction
      * @param {string} transactionId the id of the transaction to get the result.
      */
     public abstract getTransactionResult(transactionId: string): Promise<any>;
+
+    /**
+     * Returns the parsed transaction data for an ERC-20 contract interaction
+     *
+     * @param data Transaction data parameter
+     */
+    public static parseTransactionData = (
+        data: string
+    ): TransactionDescription | undefined => {
+        if (!data) {
+            return undefined;
+        }
+
+        try {
+            return this._erc20Interface.parseTransaction({ data });
+        } catch (error) {
+            log.debug('Failed to parse transaction data.', error, data);
+            return undefined;
+        }
+    };
+
+    /**
+     * Checks if the transaction category corresponds to one of the presets
+     *
+     * @returns The preset category if it exists, otherwise undefined
+     */
+    public static checkPresetCategories(
+        callData: string
+    ): TransactionCategories | undefined {
+        const presetCategories = [
+            TransactionCategories.TOKEN_METHOD_APPROVE,
+            TransactionCategories.TOKEN_METHOD_TRANSFER,
+            TransactionCategories.TOKEN_METHOD_TRANSFER_FROM,
+        ];
+
+        const parsedData = this.parseTransactionData(callData);
+
+        if (!parsedData || !parsedData.name) {
+            return undefined;
+        }
+
+        return presetCategories.find(
+            (category) => category === parsedData.name
+        );
+    }
+
+    /**
+     * Returns the arguments of an ERC20 contract call, formatted as object.
+     * If sent, transaction category will be validated.
+     *
+     * @param callData Transaction data
+     * @param category Transaction category
+     */
+    public decodeInputData = (
+        callData: string,
+        category?: TransactionCategories
+    ): Record<string, unknown> => {
+        const parsedData = SignedTransaction.parseTransactionData(callData);
+
+        // Check data and category
+        if (!parsedData || !parsedData.name) {
+            throw new Error('Invalid data');
+        }
+
+        if (category && parsedData.name !== category) {
+            throw new Error(
+                `This is a ${parsedData.name} instead of a ${category} transaction`
+            );
+        }
+
+        const definedArguments: Record<string, unknown> = {};
+
+        // Define arguments
+        for (let i = 0; i < parsedData.functionFragment.inputs.length; i++) {
+            definedArguments[parsedData.functionFragment.inputs[i].name] =
+                parsedData.args[i];
+        }
+
+        return definedArguments;
+    };
+
+    /**
+     * Returns the validated arguments of a transaction call data
+     * @param callData Transaction data
+     */
+    public abstract getDataArguments(callData: string): any;
 }

@@ -1,4 +1,4 @@
-# [Blank Wallet Extension](https://goblank.io/) background
+# [Block Wallet Extension](https://blockwallet.io/) background
 
 [![CI](../../workflows/Tests/badge.svg)](../../actions?query=Test)
 
@@ -14,7 +14,7 @@ If you already have nvm installed, just type `nvm use` to set the node version.
 make build/background
 ```
 
-For more information about how to build the complete extension refer to the following [guideline](https://github.com/Blank-Wallet/extension/blob/master/docs/guideline.md)
+For more information about how to build the complete extension refer to the following [guideline](https://github.com/block-wallet/extension/blob/master/docs/guideline.md)
 
 ### Test
 

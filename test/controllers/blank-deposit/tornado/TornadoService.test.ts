@@ -167,6 +167,7 @@ describe('TornadoService', () => {
             preferencesController,
             permissionsController,
             gasPricesController,
+            tokenController,
             {
                 transactions: [],
             },
@@ -616,6 +617,20 @@ describe('TornadoService', () => {
         let deposits = await tornadoService.getDeposits();
 
         expect(deposits.length).to.be.equals(1);
+
+        const meta = transactionController.store.getState().transactions[0];
+        expect(meta).to.not.be.undefined;
+
+        sinon.stub(networkController, 'getProvider').returns({
+            network: {
+                chainId: 5,
+                name: 'goerli',
+            },
+        } as any);
+        await tornadoService['processPendingDeposit'](meta!);
+
+        deposits = await tornadoService.getDeposits();
+
         expect(deposits[0].pair.currency).to.be.equals(KnownCurrencies.DAI);
         expect(deposits[0].pair.amount).to.be.equals('100');
         expect(deposits[0].note).to.be.equals('0000123982190139081928398132');
@@ -671,6 +686,21 @@ describe('TornadoService', () => {
         );
 
         let deposits = await tornadoService.getDeposits();
+
+        expect(deposits.length).to.be.equals(1);
+
+        const meta = transactionController.store.getState().transactions[0];
+        expect(meta).to.not.be.undefined;
+
+        sinon.stub(networkController, 'getProvider').returns({
+            network: {
+                chainId: 5,
+                name: 'goerli',
+            },
+        } as any);
+        await tornadoService['processPendingDeposit'](meta!);
+
+        deposits = await tornadoService.getDeposits();
 
         expect(deposits.length).to.be.equals(1);
         expect(deposits[0].note).to.be.equals('0000123982190139081928398132');
@@ -981,7 +1011,7 @@ describe('TornadoService', () => {
             deposit,
             '0xabc',
             18,
-            'goerli.goblank.io'
+            'goerli.blockwallet.io'
         );
         pending.chainId = 5;
 

@@ -173,6 +173,7 @@ const initialState: BlankAppState & {
     PreferencesController: {
         selectedAddress: '',
         localeInfo: 'en-US',
+        showWelcomeMessage: false,
         nativeCurrency: 'usd',
         newAddedKeyOnLevel2: '',
         showTestNetworks: false,
@@ -349,6 +350,7 @@ describe('State reconciler', () => {
                     USDT: '0xdac17f958d2ee523a2206206994597c13d831ec7',
                 },
                 showTestNetworks: true,
+                showWelcomeMessage: false,
                 popupTab: 'activity',
                 settings: {
                     hideAddressWarning: false,

@@ -336,9 +336,18 @@ export class TokenController extends BaseController<TokenControllerState> {
             userTokens[key].symbol.toLowerCase()
         );
 
-        const cleanedTokens = tokens.filter(
-            (token) => !userSymbols.includes(token.symbol.toLowerCase())
-        );
+        const cleanedTokens = tokens.filter((token) => {
+            if (userSymbols.includes(token.symbol.toLowerCase())) {
+                const tokenAddress = toChecksumAddress(token.address);
+
+                // Check if it's a token update
+                if (userTokens[tokenAddress].address !== tokenAddress) {
+                    return false;
+                }
+            }
+
+            return true;
+        });
 
         for (let i = 0; i < cleanedTokens.length; i++) {
             const tokenAddress = toChecksumAddress(cleanedTokens[i].address);

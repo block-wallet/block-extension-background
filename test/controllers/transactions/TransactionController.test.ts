@@ -91,6 +91,7 @@ describe('Transactions Controller', () => {
                 preferencesController,
                 mockedPermissionsController,
                 gasPricesController,
+                tokenController,
                 {
                     transactions: [],
                 },
@@ -272,9 +273,7 @@ describe('Transactions Controller', () => {
                 ...providerMock,
                 on: (event: string, func: Function) => {},
                 getGasPrice: () => BigNumber.from('2000000000'),
-                estimateGas: () => {
-                    throw new Error('Error estimating');
-                },
+                estimateGas: () => BigNumber.from('21000'),
                 getBlock: (block: any) => ({
                     gasLimit: BigNumber.from('200000'),
                 }),
@@ -401,6 +400,7 @@ describe('Transactions Controller', () => {
                 preferencesController,
                 permissionsController,
                 gasPricesController,
+                tokenController,
                 {
                     transactions: [],
                 },
@@ -504,7 +504,15 @@ describe('Transactions Controller', () => {
             expect(
                 transactionMeta.transactionParams.gasLimit?._hex
             ).to.be.equal(SEND_GAS_COST);
-            expect(transactionMeta).to.be.deep.equal(transactions[0]);
+            expect({
+                from: transactionMeta.transactionParams.from,
+                to: transactionMeta.transactionParams.to,
+                value: transactionMeta.transactionParams.value,
+            }).to.be.deep.equal({
+                from: mockedAccounts['goerli'][0].address.toLowerCase(),
+                to: mockedAccounts['goerli'][1].address.toLowerCase(),
+                value: BigNumber.from('1'),
+            });
         });
 
         it('Should approve and submit a transaction correctly', async () => {
@@ -825,36 +833,46 @@ describe('Transactions Controller', () => {
                 .stub(transactionController['_signatureRegistry'], 'lookup')
                 .returns(Promise.resolve('multicall(bytes[] data)'));
 
-            let { transactionCategory, methodSignature } =
-                await transactionController.determineTransactionCategory({
-                    to: mockedAccounts.goerli[0].address,
-                    data: '0xa9059cbb000000000000000000000000e7327602980619ebe59e90becfb868d48603c4f500000000000000000000000000000000000000000000006194049f30f7200000',
-                });
-
-            expect(transactionCategory).to.be.equal(
-                TransactionCategories.TOKEN_METHOD_TRANSFER
-            );
-            expect(methodSignature).to.be.undefined;
-
-            ({ transactionCategory, methodSignature } =
-                await transactionController.determineTransactionCategory({
+            let transactionMeta: TransactionMeta = {
+                id: '1',
+                status: TransactionStatus.APPROVED,
+                time: 1,
+                blocksDropCount: 1,
+                transactionParams: {
+                    to: '',
                     data: '0x64b07f210000000000000000000000000000000000000000000000000000000000000001',
-                }));
+                },
+                metaType: MetaType.REGULAR,
+                loadingGasValues: false,
+            };
 
-            expect(transactionCategory).to.be.equal(
+            let transactionCategory;
+
+            transactionCategory =
+                await transactionController.determineTransactionCategory(
+                    transactionMeta
+                );
+
+            expect(transactionCategory!.transactionCategory).to.be.equal(
                 TransactionCategories.CONTRACT_DEPLOYMENT
             );
-            expect(methodSignature).to.be.undefined;
 
-            ({ transactionCategory, methodSignature } =
-                await transactionController.determineTransactionCategory({
+            transactionMeta = {
+                ...transactionMeta,
+                transactionParams: {
+                    ...transactionMeta.transactionParams,
                     to: mockedAccounts.goerli[0].address,
-                }));
+                },
+            };
 
-            expect(transactionCategory).to.be.equal(
+            transactionCategory =
+                await transactionController.determineTransactionCategory(
+                    transactionMeta
+                );
+
+            expect(transactionCategory!.transactionCategory).to.be.equal(
                 TransactionCategories.SENT_ETHER
             );
-            expect(methodSignature).to.be.undefined;
 
             mockedProvider.restore();
             mockedProvider = sinon
@@ -864,13 +882,24 @@ describe('Transactions Controller', () => {
                     getCode: () => Promise.resolve('0x123'),
                 });
 
-            ({ transactionCategory, methodSignature } =
-                await transactionController.determineTransactionCategory({
-                    to: mockedAccounts.goerli[0].address,
+            transactionMeta = {
+                ...transactionMeta,
+                transactionParams: {
+                    ...transactionMeta.transactionParams,
                     data: '0xac9650d8',
-                }));
+                    to: mockedAccounts.goerli[0].address,
+                },
+            };
 
-            expect(transactionCategory).to.be.equal(
+            transactionCategory =
+                await transactionController.determineTransactionCategory(
+                    transactionMeta
+                );
+
+            let methodSignature =
+                await transactionController.getMethodSignature('0xac9650d8');
+
+            expect(transactionCategory!.transactionCategory).to.be.equal(
                 TransactionCategories.CONTRACT_INTERACTION
             );
             expect(methodSignature?.name).to.be.equal('Multicall');
@@ -1558,6 +1587,7 @@ describe('Transactions Controller', () => {
                 preferencesController,
                 mockedPermissionsController,
                 gasPricesController,
+                tokenController,
                 {
                     transactions: [],
                 },

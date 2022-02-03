@@ -53,4 +53,11 @@ describe('Preferences Controller', function () {
         preferencesController.settings.hideAddressWarning = false;
         expect(preferencesController.settings.hideAddressWarning).to.be.false;
     });
+
+    it('get and set show welcome message', async function () {
+        expect(preferencesController.showWelcomeMessage).to.be.false;
+
+        preferencesController.showWelcomeMessage = true;
+        expect(preferencesController.showWelcomeMessage).to.be.true;
+    });
 });

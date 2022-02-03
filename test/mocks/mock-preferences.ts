@@ -21,7 +21,8 @@ testInitState = {
     localeInfo: 'en-US',
     nativeCurrency: 'usd',
     showTestNetworks: true,
-    popupTab: "activity",
+    showWelcomeMessage: false,
+    popupTab: 'activity',
     settings: {
         hideAddressWarning: false, // Shown by default
     },

@@ -6,7 +6,7 @@ export const BLANK_TOKEN_ADDRESSES: { [chainId in number]: string } = {
     1: '0x41A3Dba3D677E573636BA691a70ff2D606c29666',
     137: '0xf4c83080e80ae530d6f8180572cbbf1ac9d5d435',
 };
-export const BLANK_TOKEN_NAME = 'GoBlank';
+export const BLANK_TOKEN_NAME = 'Block';
 
 const tokenList: {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -36,7 +36,7 @@ const NETWORK_TOKENS_LIST: INetworkTokens = {
     77: {}, // poa
     137: {
         '0xf4C83080E80AE530d6f8180572cBbf1Ac9D5d435': {
-            name: 'GoBlank Token',
+            name: 'Block Token',
             symbol: 'BLANK',
             type: 'ERC20',
             address: '0xf4C83080E80AE530d6f8180572cBbf1Ac9D5d435',

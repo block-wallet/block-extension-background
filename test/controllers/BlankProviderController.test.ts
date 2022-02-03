@@ -1,5 +1,7 @@
 import AppStateController from '@blank/background/controllers/AppStateController';
-import BlankProviderController from '@blank/background/controllers/BlankProviderController';
+import BlankProviderController, {
+    BlankProviderEvents,
+} from '@blank/background/controllers/BlankProviderController';
 import KeyringControllerDerivated from '@blank/background/controllers/KeyringControllerDerivated';
 import MockDepositController from '../mocks/mock-deposit-controller';
 import NetworkController from '../../src/controllers/NetworkController';
@@ -10,7 +12,11 @@ import sinon from 'sinon';
 import { AccountTrackerController } from '../../src/controllers/AccountTrackerController';
 import { BigNumber, ethers } from 'ethers';
 import { GasPricesController } from '@blank/background/controllers/GasPricesController';
-import { JSONRPCMethod } from '@blank/background/utils/types/ethereum';
+import {
+    JSONRPCMethod,
+    SubscriptionType,
+    Block,
+} from '@blank/background/utils/types/ethereum';
 import { PreferencesController } from '@blank/background/controllers/PreferencesController';
 import { TokenController } from '../../src/controllers/erc-20/TokenController';
 import { TokenOperationsController } from '@blank/background/controllers/erc-20/transactions/Transaction';
@@ -21,7 +27,15 @@ import { hexValue } from 'ethers/lib/utils';
 import { mockKeyringController } from '../mocks/mock-keyring-controller';
 import { mockPreferencesController } from '../mocks/mock-preferences';
 import { mockedPermissionsController } from '../mocks/mock-permissions';
+import { blockResponseMock } from '../mocks/mock-block-response';
+import { logsResponseMock } from '../mocks/mock-logs-response';
 import { providerInstances } from '@blank/background/infrastructure/connection';
+import BlockUpdatesController from '@blank/background/controllers/BlockUpdatesController';
+import BlockFetchController from '@blank/background/controllers/BlockFetchController';
+import { IncomingTransactionController } from '@blank/background/controllers/IncomingTransactionController';
+import { ExchangeRatesController } from '@blank/background/controllers/ExchangeRatesController';
+import { ExternalEventSubscription } from '@blank/background/utils/types/communication';
+import * as random from '@blank/background/utils/randomBytes';
 
 const UNI_ORIGIN = 'https://app.uniswap.org';
 const TX_HASH =
@@ -66,6 +80,10 @@ describe('Blank provider controller', function () {
     let tokenController: TokenController;
     let tokenOperationsController: TokenOperationsController;
     let transactionController: TransactionController;
+    let blockUpdatesController: BlockUpdatesController;
+    let blockFetchController: BlockFetchController;
+    let incomingTransactionController: IncomingTransactionController;
+    let exchangeRatesController: ExchangeRatesController;
 
     beforeEach(function () {
         const depositController = MockDepositController();
@@ -119,6 +137,7 @@ describe('Blank provider controller', function () {
             preferencesController,
             permissionsController,
             gasPricesController,
+            tokenController,
             {
                 transactions: [],
             },
@@ -131,13 +150,52 @@ describe('Blank provider controller', function () {
 
         keyringController = new KeyringControllerDerivated({});
 
+        exchangeRatesController = new ExchangeRatesController(
+            {
+                exchangeRates: { ETH: 2786.23, USDT: 1 },
+                networkNativeCurrency: {
+                    symbol: 'ETH',
+                    // Default Coingecko id for ETH rates
+                    coingeckoPlatformId: 'ethereum',
+                },
+            },
+            preferencesController,
+            networkController,
+            () => {
+                return {};
+            }
+        );
+
+        incomingTransactionController = new IncomingTransactionController(
+            networkController,
+            preferencesController,
+            accountTrackerController,
+            { incomingTransactions: {} }
+        );
+
+        blockFetchController = new BlockFetchController(networkController, {
+            blockFetchData: {},
+        });
+
+        blockUpdatesController = new BlockUpdatesController(
+            networkController,
+            accountTrackerController,
+            gasPricesController,
+            exchangeRatesController,
+            incomingTransactionController,
+            transactionController,
+            blockFetchController,
+            { blockData: {} }
+        );
+
         blankProviderController = new BlankProviderController(
             networkController,
             transactionController,
             mockedPermissionsController,
             appStateController,
             keyringController,
-            tokenController
+            tokenController,
+            blockUpdatesController
         );
 
         accountTrackerController.addPrimaryAccount(
@@ -164,6 +222,9 @@ describe('Blank provider controller', function () {
                 ): BigNumber[] => addresses.map(() => BigNumber.from('999')),
             } as any);
         });
+        afterEach(function () {
+            sinon.restore();
+        });
 
         it('Should get balance', async function () {
             sinon
@@ -182,9 +243,9 @@ describe('Blank provider controller', function () {
         });
 
         it('Should fetch latest block number', async function () {
-            sinon
-                .stub(ethers.providers.JsonRpcProvider.prototype, 'send')
-                .returns(Promise.resolve('0x599dbe'));
+            blockUpdatesController.store.setState({
+                blockData: { 5: { blockNumber: 5873086, updateCounter: 0 } },
+            });
 
             const web3latestBlockNr = parseInt(
                 (await blankProviderController.handle(portId, {
@@ -252,6 +313,9 @@ describe('Blank provider controller', function () {
     }).timeout(10000);
 
     describe('Wallet requests', () => {
+        afterEach(function () {
+            sinon.restore();
+        });
         it('Should get accounts', async function () {
             const accounts = Object.keys(
                 accountTrackerController.store.getState().accounts
@@ -297,6 +361,9 @@ describe('Blank provider controller', function () {
     }).timeout(10000);
 
     describe('Utils', () => {
+        afterEach(function () {
+            sinon.restore();
+        });
         it('Should hash sha3', async function () {
             const utilHash = ethers.utils.keccak256(
                 ethers.utils.toUtf8Bytes(TEXT_FOR_HASH)
@@ -308,6 +375,92 @@ describe('Blank provider controller', function () {
             });
 
             expect(utilHash).to.be.equal(web3Hash);
+        });
+    });
+
+    describe('Subscriptions', () => {
+        afterEach(function () {
+            sinon.restore();
+        });
+        it('Should notify a newHeads subscription about a new block correctly', async () => {
+            sinon
+                .stub(random, 'randomBytes')
+                .returns(
+                    Buffer.from('0x35501e05053203b4604e352baca93570', 'hex')
+                );
+            sinon.stub(NetworkController.prototype, 'getProvider').returns({
+                send: (): Promise<Block> =>
+                    new Promise((resolve) => resolve(blockResponseMock)),
+                getBlock: (_blockNumber: number) =>
+                    new Promise((resolve) =>
+                        resolve({
+                            gasLimit: BigNumber.from('88888'),
+                        })
+                    ),
+            } as any);
+
+            const callback = sinon.spy(
+                (eventData: ExternalEventSubscription) => {
+                    expect(eventData.portId).equal(1);
+                    expect((eventData.payload as Block).hash).equal(
+                        blockResponseMock.hash
+                    );
+                }
+            );
+
+            blankProviderController.on(
+                BlankProviderEvents.SUBSCRIPTION_UPDATE,
+                callback
+            );
+
+            const subId = await blankProviderController['_createSubscription'](
+                [SubscriptionType.newHeads, undefined],
+                '1'
+            );
+            await blankProviderController['_activeSubscriptions'][
+                subId
+            ].notification(1, 150000, 150001);
+        });
+
+        it('Should notify a logs subscription ', async () => {
+            sinon
+                .stub(random, 'randomBytes')
+                .returns(
+                    Buffer.from('0x35501e05053203b4604e352baca93570', 'hex')
+                );
+            sinon.stub(NetworkController.prototype, 'getProvider').returns({
+                getLogs: (): Promise<typeof logsResponseMock> =>
+                    new Promise((resolve) => resolve(logsResponseMock)),
+            } as any);
+
+            const callback = sinon.spy(
+                (eventData: ExternalEventSubscription) => {
+                    expect(eventData.portId).equal(1);
+                    expect(
+                        (eventData.payload as typeof logsResponseMock)
+                            .transactionHash
+                    ).equal(logsResponseMock.transactionHash);
+                }
+            );
+
+            blankProviderController.on(
+                BlankProviderEvents.SUBSCRIPTION_UPDATE,
+                callback
+            );
+
+            const subId = await blankProviderController['_createSubscription'](
+                [
+                    SubscriptionType.logs,
+                    {
+                        address: '0x71C7656EC7ab88b098defB751B7401B5f6d8976F',
+                        topics: ['0xf', '0xa', '0xb'],
+                    },
+                ],
+                '1'
+            );
+            await blankProviderController['_activeSubscriptions'][
+                subId
+            ].notification(1, 150000, 150004);
         });
     });
 });

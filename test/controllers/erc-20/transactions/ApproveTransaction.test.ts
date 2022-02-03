@@ -17,7 +17,7 @@ import { ApproveTransaction } from '@blank/background/controllers/erc-20/transac
 import { PreferencesController } from '@blank/background/controllers/PreferencesController';
 import { TransactionController } from '@blank/background/controllers/transactions/TransactionController';
 import { BigNumber } from '@ethersproject/bignumber';
-import { TransactionMeta } from '@blank/background/controllers/transactions/utils/types';
+import { TransactionCategories } from '@blank/background/controllers/transactions/utils/types';
 import { mockedPermissionsController } from '../../../mocks/mock-permissions';
 import PermissionsController from '@blank/background/controllers/PermissionsController';
 import { GasPricesController } from '@blank/background/controllers/GasPricesController';
@@ -115,6 +115,7 @@ describe('ApproveTransaction implementation', function () {
             preferencesController,
             permissionsController,
             gasPricesController,
+            tokenController,
             {
                 transactions: [],
             },
@@ -572,6 +573,133 @@ describe('ApproveTransaction implementation', function () {
                 expect(result).to.be.not.undefined;
                 expect(result).to.be.true;
             });
+        });
+    });
+
+    describe('Transaction data', function () {
+        const transferData =
+            '0xa9059cbb000000000000000000000000e7327602980619ebe59e90becfb868d48603c4f500000000000000000000000000000000000000000000006194049f30f7200000';
+        const allowanceData =
+            '0x095ea7b3000000000000000000000000a70b7d3fe1cb67a1f67fb691a5bcc4bc4f0af9ad0000000000000000000000000000000000000000000000000000000000000001';
+
+        it('Should parse transaction data', function () {
+            let parsedData =
+                ApproveTransaction.parseTransactionData(transferData);
+
+            expect(parsedData).to.be.not.undefined;
+
+            parsedData = ApproveTransaction.parseTransactionData('0x01');
+
+            expect(parsedData).to.be.undefined;
+        });
+
+        it('Should check preset categories', function () {
+            let transactionCategory =
+                ApproveTransaction.checkPresetCategories(transferData);
+
+            expect(transactionCategory).to.be.equal(
+                TransactionCategories.TOKEN_METHOD_TRANSFER
+            );
+
+            transactionCategory =
+                ApproveTransaction.checkPresetCategories(allowanceData);
+
+            expect(transactionCategory).to.be.equal(
+                TransactionCategories.TOKEN_METHOD_APPROVE
+            );
+        });
+
+        it('Should get data arguments', function () {
+            let callArguments = approveTransaction.decodeInputData(
+                transferData,
+                TransactionCategories.TOKEN_METHOD_TRANSFER
+            );
+
+            expect(callArguments._to).to.be.not.undefined;
+            expect(callArguments._value).to.be.not.undefined;
+            expect(callArguments._spender).to.be.undefined;
+
+            callArguments = approveTransaction.decodeInputData(
+                allowanceData,
+                TransactionCategories.TOKEN_METHOD_APPROVE
+            );
+
+            expect(callArguments._to).to.be.undefined;
+            expect(callArguments._value).to.be.not.undefined;
+            expect(callArguments._spender).to.be.not.undefined;
+        });
+    });
+
+    describe('Token Approval', function () {
+        const testApproval = {
+            contract: '0x1f9840a85d5af5bf1d1762f925bdaddc4201f984', // Uni goerli token
+            spender: '0xa70B7d3fe1Cb67a1f67fB691A5Bcc4BC4f0AF9Ad',
+            allowance: '0x01',
+            data: '0x095ea7b3000000000000000000000000a70b7d3fe1cb67a1f67fb691a5bcc4bc4f0af9ad0000000000000000000000000000000000000000000000000000000000000001',
+        };
+
+        it('Should get approval arguments', function () {
+            const approvalArguments = approveTransaction.getDataArguments(
+                testApproval.data
+            );
+
+            expect(approvalArguments._spender).to.be.equal(
+                testApproval.spender
+            );
+            expect(approvalArguments._value._hex).to.be.equal(
+                testApproval.allowance
+            );
+        });
+
+        it('Should get custom approval data', function () {
+            const newAllowance = '0x016345785d8a0000';
+            const correctUpdatedAllowance =
+                '0x095ea7b3000000000000000000000000a70b7d3fe1cb67a1f67fb691a5bcc4bc4f0af9ad000000000000000000000000000000000000000000000000016345785d8a0000';
+
+            const newApprovalData =
+                approveTransaction.getDataForCustomAllowance(
+                    testApproval.data,
+                    newAllowance
+                );
+
+            expect(newApprovalData).to.be.equal(correctUpdatedAllowance);
+
+            const approvalArguments =
+                approveTransaction.getDataArguments(newApprovalData);
+
+            expect(approvalArguments._value._hex).to.be.equal(newAllowance);
+        });
+
+        it('Should not get custom approval data', function () {
+            const badData = testApproval.data + '1';
+            const badAllowance = testApproval.allowance + 'h';
+            const badAllowance2 =
+                testApproval.allowance +
+                'ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff';
+
+            expect(
+                approveTransaction.getDataForCustomAllowance.bind(
+                    approveTransaction,
+                    badData,
+                    testApproval.allowance
+                )
+            ).to.throw('Invalid data');
+
+            expect(
+                approveTransaction.getDataForCustomAllowance.bind(
+                    approveTransaction,
+                    testApproval.data,
+                    badAllowance
+                )
+            ).to.throw('Invalid new allowance');
+
+            expect(
+                approveTransaction.getDataForCustomAllowance.bind(
+                    approveTransaction,
+                    testApproval.data,
+                    badAllowance2
+                )
+            ).to.throw('Invalid new allowance');
         });
     });
 });

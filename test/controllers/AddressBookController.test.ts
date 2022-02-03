@@ -107,6 +107,7 @@ describe('Address book controller implementation', function () {
             preferencesController,
             permissionsController,
             gasPricesController,
+            tokenController,
             {
                 transactions: [],
             },

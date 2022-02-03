@@ -169,6 +169,10 @@ export interface BlankControllerProps {
     encryptor?: any;
 }
 
+export enum BlankControllerEvents {
+    EXTERNAL_REQUESTS_AMOUNT_CHANGE = 'EXTERNAL_REQUESTS_AMOUNT_CHANGE',
+}
+
 export default class BlankController extends EventEmitter {
     // Controllers
     private readonly appStateController: AppStateController;
@@ -292,6 +296,7 @@ export default class BlankController extends EventEmitter {
             this.preferencesController,
             this.permissionsController,
             this.gasPricesController,
+            this.tokenController,
             initState.TransactionController,
             this.keyringController.signTransaction.bind(this.keyringController)
         );
@@ -356,7 +361,8 @@ export default class BlankController extends EventEmitter {
             this.permissionsController,
             this.appStateController,
             this.keyringController,
-            this.tokenController
+            this.tokenController,
+            this.blockUpdatesController
         );
 
         this.addressBookController = new AddressBookController({
@@ -412,6 +418,19 @@ export default class BlankController extends EventEmitter {
             this.manageControllers();
         });
 
+        // Trigger method to manage external requests amount on update of relevent stores
+        this.blankProviderController.store.subscribe(() => {
+            this.handleExternalRequestAmountChange();
+        });
+
+        this.transactionController.store.subscribe(() => {
+            this.handleExternalRequestAmountChange();
+        });
+
+        this.permissionsController.store.subscribe(() => {
+            this.handleExternalRequestAmountChange();
+        });
+
         // Set storage save on state update
         this.store.subscribe(this.storeState);
 
@@ -457,6 +476,31 @@ export default class BlankController extends EventEmitter {
             this._devTools.send(`@@BlankAppState/${action}`, state);
         }
     };
+
+    // Emit event on dapp request change, to update extension label
+    private handleExternalRequestAmountChange() {
+        const dappRequestsAmount = Object.keys(
+            this.blankProviderController.store.getState().dappRequests
+        ).length;
+
+        const unapprovedTransactionsAmount = Object.keys(
+            this.transactionController.UIStore.getState().unapprovedTransactions
+        ).length;
+
+        const permissionRequests = Object.keys(
+            this.permissionsController.store.getState().permissionRequests
+        ).length;
+
+        const totalExternalRequestsAmount =
+            dappRequestsAmount +
+            unapprovedTransactionsAmount +
+            permissionRequests;
+
+        this.emit(
+            BlankControllerEvents.EXTERNAL_REQUESTS_AMOUNT_CHANGE,
+            totalExternalRequestsAmount
+        );
+    }
 
     /**
      * Create subscription method
@@ -832,6 +876,8 @@ export default class BlankController extends EventEmitter {
                 );
             case Messages.APP.SET_USER_SETTINGS:
                 return this.setUserSettings(request as RequestUserSettings);
+            case Messages.WALLET.DISMISS_WELCOME_MESSAGE:
+                return this.dismissWelcomeMessage();
             default:
                 throw new Error(`Unable to handle message of type ${type}`);
         }
@@ -1157,7 +1203,7 @@ export default class BlankController extends EventEmitter {
      *
      * @param id - id of the transaction being confirmed.
      * @param feeData - fee data selected by the user. Will update transaction's data if needed.
-     * @param advancedData - advanced data that can be changed by the user to apply to the transaction. For now customNonce
+     * @param advancedData - advanced data that can be changed by the user to apply to the transaction.
      */
     private async confirmTransaction({
         id,
@@ -1182,11 +1228,16 @@ export default class BlankController extends EventEmitter {
                     meta.transactionParams.maxPriorityFeePerGas,
                 maxFeePerGas:
                     feeData.maxFeePerGas || meta.transactionParams.maxFeePerGas,
-
                 nonce:
                     advancedData?.customNonce || meta.transactionParams.nonce, // custom nonce update
             },
             flashbots: advancedData?.flashbots || meta.flashbots, // flashbots update
+            advancedData: {
+                ...meta.advancedData,
+                allowance:
+                    advancedData.customAllowance ||
+                    meta.advancedData?.allowance,
+            },
         });
 
         return this.transactionController.approveTransaction(id);
@@ -1854,6 +1905,9 @@ export default class BlankController extends EventEmitter {
         // Set selected address
         this.preferencesController.setSelectedAddress(account);
 
+        //Show the welcome to the wallet message
+        this.preferencesController.setShowWelcomeMessage(true);
+
         // Set account tracker
         this.accountTrackerController.addPrimaryAccount(account);
 
@@ -1905,6 +1959,9 @@ export default class BlankController extends EventEmitter {
 
         // Set selected address
         this.preferencesController.setSelectedAddress(account);
+
+        //Show the welcome to the wallet message
+        this.preferencesController.setShowWelcomeMessage(true);
 
         // Set account tracker
         this.accountTrackerController.addPrimaryAccount(account);
@@ -2368,6 +2425,14 @@ export default class BlankController extends EventEmitter {
         settings,
     }: RequestUserSettings): Promise<boolean> {
         this.preferencesController.settings = settings;
+        return true;
+    }
+
+    /**
+     * Sets the showWelcomeMessage flag to false
+     */
+    private async dismissWelcomeMessage(): Promise<boolean> {
+        this.preferencesController.showWelcomeMessage = false;
         return true;
     }
 

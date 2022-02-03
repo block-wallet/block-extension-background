@@ -75,6 +75,7 @@ describe('AccountTracker controller implementation', function () {
             preferencesController,
             permissionsController,
             gasPricesController,
+            tokenController,
             {
                 transactions: [],
             },

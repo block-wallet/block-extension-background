@@ -97,6 +97,7 @@ describe('TornadoEventsService', () => {
             preferencesController,
             permissionsController,
             gasPricesController,
+            tokenController,
             {
                 transactions: [],
             },

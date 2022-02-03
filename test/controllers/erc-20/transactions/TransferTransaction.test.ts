@@ -84,6 +84,7 @@ describe('TransferTransaction implementation', function () {
             preferencesController,
             permissionsController,
             gasPricesController,
+            tokenController,
             {
                 transactions: [],
             },

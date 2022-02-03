@@ -8,6 +8,7 @@ import {
     tokenAddressParamNotPresentError,
 } from '../TokenController';
 import { Token } from '../Token';
+import { Interface } from 'ethers/lib/utils';
 import log from 'loglevel';
 
 export interface TokenTransactionProps {
@@ -16,6 +17,8 @@ export interface TokenTransactionProps {
 
 export class TokenTransactionController {
     protected readonly _networkController: NetworkController;
+    protected static _erc20Interface: Interface = new Interface(erc20Abi);
+
     constructor(props: TokenTransactionProps) {
         this._networkController = props.networkController;
     }

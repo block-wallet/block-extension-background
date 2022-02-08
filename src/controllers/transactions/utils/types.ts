@@ -49,6 +49,17 @@ export interface TransactionMeta {
      */
     flashbots?: boolean;
 
+    /**
+     * Advanced data to handle specific tx types
+     */
+    advancedData?: {
+        /**
+         * Allowance and token decimals to handle an ERC-20 token approval
+         */
+        allowance?: string; // hex string
+        decimals?: number;
+    };
+
     confirmationTime?: number;
     chainId?: number;
     transactionParams: TransactionParams;
@@ -66,6 +77,14 @@ export interface TransactionMeta {
         message: string;
         stack?: string;
     };
+}
+
+export interface uiTransactionParams extends TransactionParams {
+    value: BigNumber;
+    gasLimit: BigNumber;
+    gasPrice?: BigNumber;
+    maxPriorityFeePerGas?: BigNumber;
+    maxFeePerGas?: BigNumber;
 }
 
 /**
@@ -144,6 +163,7 @@ export enum TransactionType {
  * Transaction params that can be setted by the user using the Advance Settings popup.
  */
 export interface TransactionAdvancedData {
+    customAllowance?: string;
     customNonce?: number;
     flashbots?: boolean;
 }

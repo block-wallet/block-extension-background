@@ -350,4 +350,11 @@ export class DepositTransaction extends SignedTransaction {
 
         return transactionMeta.transactionParams.hash!;
     }
+
+    /**
+     * Returns the validated arguments of a transaction call data
+     */
+    public getDataArguments(): void {
+        throw new Error('Method not implemented');
+    }
 }

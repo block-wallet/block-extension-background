@@ -4,9 +4,16 @@ import NetworkController, { NetworkEvents } from './NetworkController';
 import { BigNumber, utils } from 'ethers';
 import log from 'loglevel';
 import { Mutex } from 'async-mutex';
-import { Network } from '../utils/constants/networks';
+import {
+    ACTIONS_TIME_INTERVALS_DEFAULT_VALUES,
+    Network,
+} from '../utils/constants/networks';
 import { FeeData } from '@ethersproject/abstract-provider';
 import axios from 'axios';
+import { ActionIntervalController } from './block-updates/ActionIntervalController';
+import BlockUpdatesController, {
+    BlockUpdatesEvents,
+} from './block-updates/BlockUpdatesController';
 
 const CHAIN_FEE_DATA_SERVICE_URL = 'https://chain-fee.blockwallet.io/v1';
 const BLOCKS_TO_WAIT_BEFORE_CHECHKING_FOR_CHAIN_SUPPORT = 100;
@@ -50,18 +57,21 @@ export interface FeeHistory {
 
 const expirationTime = 75000;
 export class GasPricesController extends BaseController<GasPricesControllerState> {
-    private readonly _networkController: NetworkController;
+    private readonly _gasPriceUpdateIntervalController: ActionIntervalController;
     private readonly _mutex: Mutex;
     private expiration: number;
 
     constructor(
-        initialState: GasPricesControllerState,
-        networkController: NetworkController
+        private readonly _networkController: NetworkController,
+        private readonly _blockUpdatesController: BlockUpdatesController,
+        initialState: GasPricesControllerState
     ) {
         super(initialState);
 
         this._mutex = new Mutex();
-        this._networkController = networkController;
+        this._gasPriceUpdateIntervalController = new ActionIntervalController(
+            this._networkController
+        );
 
         // Set for expiration policy
         this.expiration = new Date().getTime();
@@ -69,6 +79,25 @@ export class GasPricesController extends BaseController<GasPricesControllerState
             NetworkEvents.NETWORK_CHANGE,
             async (network: Network) => {
                 this.updateGasPrices(network.chainId);
+            }
+        );
+
+        // Subscription to new blocks
+        this._blockUpdatesController.on(
+            BlockUpdatesEvents.BLOCK_UPDATES_SUBSCRIPTION,
+            async (chainId: number, _: number, newBlockNumber: number) => {
+                const network =
+                    this._networkController.getNetworkFromChainId(chainId);
+                const interval =
+                    network?.actionsTimeIntervals.gasPricesUpdate ||
+                    ACTIONS_TIME_INTERVALS_DEFAULT_VALUES.gasPricesUpdate;
+
+                this._gasPriceUpdateIntervalController.tick(
+                    interval,
+                    async () => {
+                        await this.updateGasPrices(newBlockNumber, chainId);
+                    }
+                );
             }
         );
     }
@@ -109,10 +138,10 @@ export class GasPricesController extends BaseController<GasPricesControllerState
      * It updates the state with the current gas prices following
      * a 5% variation and expiration policy
      */
-    public async updateGasPrices(
+    public updateGasPrices = async (
         currentBlockNumber: number,
         chainId: number = this._networkController.network.chainId
-    ): Promise<void> {
+    ): Promise<void> => {
         try {
             const oldGasPriceLevels = this.getGasPricesLevels(chainId);
             const isEIP1559Compatible =
@@ -183,7 +212,7 @@ export class GasPricesController extends BaseController<GasPricesControllerState
         } catch (error) {
             log.warn('Unable to update the gas prices', error.message || error);
         }
-    }
+    };
 
     /**
      * Fetches the fee's service to get the current gas prices.
@@ -431,12 +460,13 @@ export class GasPricesController extends BaseController<GasPricesControllerState
                         },
                     };
                 } else {
-                    const gasPrice = await this._networkController
-                        .getProvider()
-                        .getGasPrice();
+                    const networkCalls = await Promise.all([
+                        this._networkController.getProvider().getGasPrice(),
+                        this._networkController.getLatestBlock(),
+                    ]);
 
-                    const { gasLimit: blockGasLimit } =
-                        await this._networkController.getLatestBlock();
+                    const gasPrice: BigNumber = BigNumber.from(networkCalls[0]);
+                    const { gasLimit: blockGasLimit } = networkCalls[1];
 
                     const gasPriceSlow = gasPrice.mul(85).div(100);
                     const gasPriceAverage = gasPrice;

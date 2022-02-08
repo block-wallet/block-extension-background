@@ -153,7 +153,7 @@ enum WALLET {
     SETUP_COMPLETE = 'SETUP_COMPLETE',
     RESET = 'RESET',
     DISMISS_WELCOME_MESSAGE = 'DISMISS_WELCOME_MESSAGE',
-    DISMISS_LATESTS_NEWS_MESSAGE = 'DISMISS_LATESTS_NEWS_MESSAGE',
+    DISMISS_RELEASE_NOTES = 'DISMISS_RELEASE_NOTES',
 }
 
 enum TOKEN {
@@ -314,7 +314,6 @@ export interface RequestSignatures {
     [Messages.TRANSACTION.CONFIRM]: [RequestConfirmTransaction, string];
     [Messages.TRANSACTION.REJECT]: [RequestRejectTransaction, boolean];
     [Messages.TRANSACTION.GET_LATEST_GAS_PRICE]: [undefined, BigNumber];
-    [Messages.TRANSACTION.CONFIRM]: [RequestConfirmTransaction, string];
     [Messages.TRANSACTION.SEND_ETHER]: [RequestSendEther, string];
     [Messages.TRANSACTION.ADD_NEW_SEND_TRANSACTION]: [
         RequestAddAsNewSendTransaction,
@@ -385,7 +384,8 @@ export interface RequestSignatures {
         RequestAddressBookGetRecentAddresses,
         NetworkAddressBook
     ];
-    [Messages.WALLET.DISMISS_WELCOME_MESSAGE]: [DismissWelcomeMessage, boolean];
+    [Messages.WALLET.DISMISS_WELCOME_MESSAGE]: [DismissMessage, boolean];
+    [Messages.WALLET.DISMISS_RELEASE_NOTES]: [DismissMessage, boolean];
 }
 
 export type MessageTypes = keyof RequestSignatures;
@@ -832,7 +832,7 @@ export interface WindowTransportResponseMessage
     origin: Origin;
 }
 
-export interface DismissWelcomeMessage {}
+export interface DismissMessage {}
 
 export enum Origin {
     BACKGROUND = 'BLANK_BACKGROUND',

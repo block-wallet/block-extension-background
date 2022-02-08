@@ -1,4 +1,5 @@
 import { BigNumber } from '@ethersproject/bignumber';
+import { isHexString, isValidAddress, stripHexPrefix } from 'ethereumjs-util';
 import { ethers } from 'ethers';
 import { TransactionGasEstimation } from '../../transactions/TransactionController';
 import {
@@ -24,6 +25,11 @@ import {
 export const APPROVE_TRANSACTION_FALLBACK_GAS_LIMIT = '0xcb34'; // 52020
 
 export type ApproveTransactionProps = SignedTransactionProps;
+
+export interface rawApproveDataArguments {
+    _spender: string;
+    _value: BigNumber;
+}
 
 export interface ApproveTransactionPopulatedTransactionParams
     extends PopulatedTransactionParams {
@@ -173,4 +179,58 @@ export class ApproveTransaction extends SignedTransaction {
 
         return true;
     }
+
+    /**
+     * Returns the validated arguments for a token approval call
+     *
+     * @param callData Transaction data
+     */
+    public getDataArguments = (callData: string): rawApproveDataArguments => {
+        const { _spender, _value } = this.decodeInputData(
+            callData,
+            TransactionCategories.TOKEN_METHOD_APPROVE
+        );
+
+        if (typeof _spender !== 'string' || !isValidAddress(_spender)) {
+            throw new Error('Invalid spender');
+        }
+
+        if (!_value || !BigNumber.isBigNumber(_value) || !_value._hex) {
+            throw new Error('Invalid approval value');
+        }
+
+        return { _spender, _value };
+    };
+
+    /**
+     * Returns the modified data parameter for a token approval method.
+     *
+     * @param callData transaction data
+     * @param customAllowance new allowance in total asset value, hex string
+     */
+    public getDataForCustomAllowance = (
+        callData: string,
+        customAllowance: string
+    ): string => {
+        const { _spender } = this.getDataArguments(callData);
+
+        const strippedSpender = stripHexPrefix(_spender).toLowerCase();
+        const [signature, allowance] = callData.split(strippedSpender);
+
+        if (!signature || !allowance || allowance.length !== 64) {
+            throw new Error('Invalid transaction data');
+        }
+
+        const strippedAllowance = stripHexPrefix(customAllowance);
+
+        // Validate new allowance
+        if (!isHexString(customAllowance) || strippedAllowance.length > 64) {
+            throw new Error('Invalid new allowance');
+        }
+
+        // Fill allowance field to be 64 digits long
+        const filledAllowance = strippedAllowance.padStart(64, '0');
+
+        return signature + strippedSpender + filledAllowance;
+    };
 }

@@ -3,6 +3,26 @@ import { BaseController } from '../infrastructure/BaseController';
 export interface UserSettings {
     // Setting that indicates if a warning is shown when receiving a transaction from an address different from the selected one.
     hideAddressWarning: boolean;
+    subscribedToReleaseaNotes: boolean;
+}
+
+export interface Note {
+    type: 'success' | 'warn';
+    message: string;
+}
+
+interface NoteSection {
+    title: string;
+    notes: Note[];
+}
+export interface ReleaseNote {
+    version: string;
+    sections: NoteSection[];
+}
+
+interface ReleaseNotesSettings {
+    latestReleaseNotes: ReleaseNote[];
+    lastVersionUserSawNews: string;
 }
 
 export type PopupTabs = 'activity' | 'assets';
@@ -15,6 +35,7 @@ export interface PreferencesControllerState {
     popupTab: PopupTabs;
     settings: UserSettings;
     showWelcomeMessage: boolean;
+    releaseNotesSettings: ReleaseNotesSettings;
 }
 
 export interface PreferencesControllerProps {
@@ -55,6 +76,15 @@ export class PreferencesController extends BaseController<PreferencesControllerS
     public setShowWelcomeMessage(showWelcomeMessage: boolean): void {
         this.store.updateState({
             showWelcomeMessage,
+        });
+    }
+
+    public initReleaseNotesSettings(currentVersion: string): void {
+        this.store.updateState({
+            releaseNotesSettings: {
+                latestReleaseNotes: [],
+                lastVersionUserSawNews: currentVersion,
+            },
         });
     }
 
@@ -145,5 +175,15 @@ export class PreferencesController extends BaseController<PreferencesControllerS
      */
     public set showWelcomeMessage(showWelcomeMessage: boolean) {
         this.store.updateState({ showWelcomeMessage });
+    }
+
+    public set releaseNotesSettings(
+        releaseNotesSettings: ReleaseNotesSettings
+    ) {
+        this.store.updateState({ releaseNotesSettings });
+    }
+
+    public get releaseNotesSettings() {
+        return this.store.getState().releaseNotesSettings;
     }
 }

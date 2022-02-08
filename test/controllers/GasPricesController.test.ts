@@ -13,16 +13,27 @@ import { Network } from '@blank/background/utils/constants/networks';
 import { it } from 'mocha';
 import { Block } from '@ethersproject/abstract-provider';
 import axios from 'axios';
+import BlockUpdatesController from '@blank/background/controllers/block-updates/BlockUpdatesController';
+import BlockFetchController from '@blank/background/controllers/block-updates/BlockFetchController';
 
 describe('GasPrices Controller', () => {
     let gasPricesController: GasPricesController;
     let networkController: NetworkController;
+    let blockUpdatesController: BlockUpdatesController;
     beforeEach(() => {
         networkController = getNetworkControllerInstance();
+        blockUpdatesController = new BlockUpdatesController(
+            networkController,
+            new BlockFetchController(networkController, {
+                blockFetchData: {},
+            }),
+            { blockData: {} }
+        );
 
         gasPricesController = new GasPricesController(
-            initialState.GasPricesController,
-            networkController
+            networkController,
+            blockUpdatesController,
+            initialState.GasPricesController
         );
     });
     afterEach(function () {

@@ -4,7 +4,7 @@ import { addHexPrefix } from 'ethereumjs-util';
 import log from 'loglevel';
 import { CurrencyAmountPair } from '../types';
 import { Deposit, Withdrawal } from './stores/ITornadoEventsDB';
-import BlockUpdatesController from '../../BlockUpdatesController';
+import BlockUpdatesController from '../../block-updates/BlockUpdatesController';
 import { TornadoEvents } from './config/ITornadoContract';
 
 export interface TornadoEventsServiceProps {

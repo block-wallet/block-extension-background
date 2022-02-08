@@ -5,25 +5,11 @@ import {
 import sinon from 'sinon';
 import { expect } from 'chai';
 import axios, { AxiosResponse } from 'axios';
-import { AccountTrackerController } from '@blank/background/controllers/AccountTrackerController';
-import { IncomingTransactionController } from '@blank/background/controllers/IncomingTransactionController';
-import BlockUpdatesController from '@blank/background/controllers/BlockUpdatesController';
-import { mockKeyringController } from '../../../mocks/mock-keyring-controller';
+import BlockUpdatesController from '@blank/background/controllers/block-updates/BlockUpdatesController';
 import { getNetworkControllerInstance } from '../../../mocks/mock-network-instance';
 import NetworkController from '@blank/background/controllers/NetworkController';
-import { TokenController } from '@blank/background/controllers/erc-20/TokenController';
-import { mockPreferencesController } from '../../../mocks/mock-preferences';
-import { PreferencesController } from '@blank/background/controllers/PreferencesController';
-import { TokenOperationsController } from '@blank/background/controllers/erc-20/transactions/Transaction';
-import { GasPricesController } from '@blank/background/controllers/GasPricesController';
-import initialState from '@blank/background/utils/constants/initialState';
-import { ExchangeRatesController } from '@blank/background/controllers/ExchangeRatesController';
 import { BigNumber, Contract, Event } from 'ethers';
-import TransactionController from '@blank/background/controllers/transactions/TransactionController';
-import { TypedTransaction } from '@ethereumjs/tx';
-import PermissionsController from '@blank/background/controllers/PermissionsController';
-import { mockedPermissionsController } from 'test/mocks/mock-permissions';
-import BlockFetchController from '@blank/background/controllers/BlockFetchController';
+import BlockFetchController from '@blank/background/controllers/block-updates/BlockFetchController';
 
 describe('TornadoEventsService', () => {
     const accounts = {
@@ -40,85 +26,16 @@ describe('TornadoEventsService', () => {
     };
     let _tornadoEventsService: TornadoEventsService;
     let networkController: NetworkController;
-    let accountTrackerController: AccountTrackerController;
-    let preferencesController: PreferencesController;
-    let tokenController: TokenController;
-    let tokenOperationsController: TokenOperationsController;
-    let gasPricesController: GasPricesController;
-    let blockFetchController: BlockFetchController;
     let blockUpdatesController: BlockUpdatesController;
-    let exchangeRatesController: ExchangeRatesController;
-    let incomingTransactionController: IncomingTransactionController;
-    let transactionController: TransactionController;
-    let permissionsController: PermissionsController;
 
     beforeEach(async () => {
         networkController = getNetworkControllerInstance();
-        preferencesController = mockPreferencesController;
-        permissionsController = mockedPermissionsController;
-
-        tokenOperationsController = new TokenOperationsController({
-            networkController: networkController,
-        });
-
-        tokenController = new TokenController(
-            {
-                userTokens: {} as any,
-                deletedUserTokens: {} as any,
-            },
-            {
-                preferencesController,
-                networkController,
-                tokenOperationsController,
-            }
-        );
-        accountTrackerController = new AccountTrackerController(
-            mockKeyringController,
-            networkController,
-            tokenController,
-            tokenOperationsController,
-            preferencesController
-        );
-
-        incomingTransactionController = new IncomingTransactionController(
-            networkController,
-            preferencesController,
-            accountTrackerController,
-            { incomingTransactions: {} }
-        );
-
-        gasPricesController = new GasPricesController(
-            initialState.GasPricesController,
-            networkController
-        );
-
-        transactionController = new TransactionController(
-            networkController,
-            preferencesController,
-            permissionsController,
-            gasPricesController,
-            {
-                transactions: [],
-            },
-            async (ethTx: TypedTransaction) => {
-                const privateKey = Buffer.from(accounts.goerli[0].key, 'hex');
-                return Promise.resolve(ethTx.sign(privateKey));
-            },
-            { txHistoryLimit: 40 }
-        );
-
-        blockFetchController = new BlockFetchController(networkController, {
-            blockFetchData: {},
-        });
 
         blockUpdatesController = new BlockUpdatesController(
             networkController,
-            accountTrackerController,
-            gasPricesController,
-            exchangeRatesController,
-            incomingTransactionController,
-            transactionController,
-            blockFetchController,
+            new BlockFetchController(networkController, {
+                blockFetchData: {},
+            }),
             { blockData: {} }
         );
 

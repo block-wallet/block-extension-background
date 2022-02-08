@@ -25,6 +25,11 @@ testInitState = {
     popupTab: 'activity',
     settings: {
         hideAddressWarning: false, // Shown by default
+        subscribedToReleaseaNotes: true,
+    },
+    releaseNotesSettings: {
+        lastVersionUserSawNews: '0.1.3',
+        latestReleaseNotes: [],
     },
 };
 

@@ -8,13 +8,14 @@ import BlankStorageStore from './infrastructure/stores/BlankStorageStore';
 import initialState, { BlankAppState } from './utils/constants/initialState';
 import reconcileState from './infrastructure/stores/migrator/reconcileState';
 import compareVersions from 'compare-versions';
-import { openExtensionInBrowser } from './utils/window';
+import { getVersion, openExtensionInBrowser } from './utils/window';
 import { setupConnection } from './infrastructure/connection';
 import { migrator } from './infrastructure/stores/migrator/migrator';
 import { DeepPartial } from './utils/types/helpers';
 import log, { LogLevelDesc } from 'loglevel';
+import { resolvePreferencesAfterWalletUpdate } from './utils/userPreferences';
 
-// Initialize Blank State Store
+// Initialize Block State Store
 const blankStateStore = new BlankStorageStore();
 
 /**
@@ -54,6 +55,17 @@ const getPersistedState = new Promise<BlankAppState>((resolve) => {
                     // Update persisted store version to newly one
                     await blankStateStore.setVersion(packageVersion!);
 
+                    const manifestVersion = getVersion();
+
+                    //calculate release notes here
+                    const { releaseNotesSettings } =
+                        await resolvePreferencesAfterWalletUpdate(
+                            reconciledState.PreferencesController,
+                            manifestVersion
+                        );
+                    reconciledState.PreferencesController.releaseNotesSettings =
+                        releaseNotesSettings!;
+
                     // Persist reconciled state
                     blankStateStore.set('blankState', reconciledState);
 
@@ -91,17 +103,17 @@ const updateExtensionBadge = (label: string) => {
 };
 
 /**
- * Initializes blank wallet
+ * Initializes block wallet
  *
  */
-const initBlankWallet = async () => {
+const initBlockWallet = async () => {
     // Get persisted state
     const initState = await getPersistedState;
 
     // Check if devTools are available
     const devTools = getDevTools();
 
-    // Initialize blank controller
+    // Initialize block controller
     const blankController = new BlankController({
         initState,
         blankStateStore,
@@ -151,7 +163,7 @@ const initBlankWallet = async () => {
 };
 
 // Start blank wallet
-initBlankWallet().catch((error) => {
+initBlockWallet().catch((error) => {
     log.error(error.message || error);
 });
 

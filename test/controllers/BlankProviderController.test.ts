@@ -30,10 +30,8 @@ import { mockedPermissionsController } from '../mocks/mock-permissions';
 import { blockResponseMock } from '../mocks/mock-block-response';
 import { logsResponseMock } from '../mocks/mock-logs-response';
 import { providerInstances } from '@blank/background/infrastructure/connection';
-import BlockUpdatesController from '@blank/background/controllers/BlockUpdatesController';
-import BlockFetchController from '@blank/background/controllers/BlockFetchController';
-import { IncomingTransactionController } from '@blank/background/controllers/IncomingTransactionController';
-import { ExchangeRatesController } from '@blank/background/controllers/ExchangeRatesController';
+import BlockUpdatesController from '@blank/background/controllers/block-updates/BlockUpdatesController';
+import BlockFetchController from '@blank/background/controllers/block-updates/BlockFetchController';
 import { ExternalEventSubscription } from '@blank/background/utils/types/communication';
 import * as random from '@blank/background/utils/randomBytes';
 
@@ -73,7 +71,6 @@ describe('Blank provider controller', function () {
     let appStateController: AppStateController;
     let blankProviderController: BlankProviderController;
     let gasPricesController: GasPricesController;
-    let keyringController: KeyringControllerDerivated;
     let networkController: NetworkController;
     let permissionsController: PermissionsController;
     let preferencesController: PreferencesController;
@@ -81,15 +78,20 @@ describe('Blank provider controller', function () {
     let tokenOperationsController: TokenOperationsController;
     let transactionController: TransactionController;
     let blockUpdatesController: BlockUpdatesController;
-    let blockFetchController: BlockFetchController;
-    let incomingTransactionController: IncomingTransactionController;
-    let exchangeRatesController: ExchangeRatesController;
 
     beforeEach(function () {
         const depositController = MockDepositController();
 
         // Instantiate objects
         networkController = getNetworkControllerInstance();
+
+        blockUpdatesController = new BlockUpdatesController(
+            networkController,
+            new BlockFetchController(networkController, {
+                blockFetchData: {},
+            }),
+            { blockData: {} }
+        );
 
         preferencesController = mockPreferencesController;
         permissionsController = mockedPermissionsController;
@@ -115,7 +117,8 @@ describe('Blank provider controller', function () {
             networkController,
             tokenController,
             tokenOperationsController,
-            preferencesController
+            preferencesController,
+            blockUpdatesController
         );
 
         appStateController = new AppStateController(
@@ -128,8 +131,9 @@ describe('Blank provider controller', function () {
         );
 
         gasPricesController = new GasPricesController(
-            initialState.GasPricesController,
-            networkController
+            networkController,
+            blockUpdatesController,
+            initialState.GasPricesController
         );
 
         transactionController = new TransactionController(
@@ -137,6 +141,8 @@ describe('Blank provider controller', function () {
             preferencesController,
             permissionsController,
             gasPricesController,
+            tokenController,
+            blockUpdatesController,
             {
                 transactions: [],
             },
@@ -147,52 +153,12 @@ describe('Blank provider controller', function () {
             { txHistoryLimit: 40 }
         );
 
-        keyringController = new KeyringControllerDerivated({});
-
-        exchangeRatesController = new ExchangeRatesController(
-            {
-                exchangeRates: { ETH: 2786.23, USDT: 1 },
-                networkNativeCurrency: {
-                    symbol: 'ETH',
-                    // Default Coingecko id for ETH rates
-                    coingeckoPlatformId: 'ethereum',
-                },
-            },
-            preferencesController,
-            networkController,
-            () => {
-                return {};
-            }
-        );
-
-        incomingTransactionController = new IncomingTransactionController(
-            networkController,
-            preferencesController,
-            accountTrackerController,
-            { incomingTransactions: {} }
-        );
-
-        blockFetchController = new BlockFetchController(networkController, {
-            blockFetchData: {},
-        });
-
-        blockUpdatesController = new BlockUpdatesController(
-            networkController,
-            accountTrackerController,
-            gasPricesController,
-            exchangeRatesController,
-            incomingTransactionController,
-            transactionController,
-            blockFetchController,
-            { blockData: {} }
-        );
-
         blankProviderController = new BlankProviderController(
             networkController,
             transactionController,
             mockedPermissionsController,
             appStateController,
-            keyringController,
+            new KeyringControllerDerivated({}),
             tokenController,
             blockUpdatesController
         );
@@ -243,7 +209,7 @@ describe('Blank provider controller', function () {
 
         it('Should fetch latest block number', async function () {
             blockUpdatesController.store.setState({
-                blockData: { 5: { blockNumber: 5873086, updateCounter: 0 } },
+                blockData: { 5: { blockNumber: 5873086 } },
             });
 
             const web3latestBlockNr = parseInt(

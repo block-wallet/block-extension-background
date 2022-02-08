@@ -3,6 +3,7 @@ import { BaseController } from '../infrastructure/BaseController';
 import { Network, Networks, HARDFORKS } from '../utils/constants/networks';
 import { ethers } from 'ethers';
 import { poll } from '@ethersproject/web';
+import log from 'loglevel';
 
 export enum NetworkEvents {
     NETWORK_CHANGE = 'NETWORK_CHANGE',
@@ -42,6 +43,8 @@ export default class NetworkController extends BaseController<NetworkControllerS
 
         setInterval(() => this._updateProviderNetworkStatus(), 20000);
         this._updateProviderNetworkStatus();
+
+        this.setMaxListeners(30); // currently, we need 16
     }
 
     /**

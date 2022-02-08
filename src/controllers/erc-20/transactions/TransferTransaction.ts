@@ -67,7 +67,6 @@ export class TransferTransaction extends SignedTransaction {
         amount: BigNumber,
         feeData: TransactionFeeData,
         advancedData: TransactionAdvancedData
-
     ): Promise<string> {
         const transactionMeta = await this.addAsNewTransaction(
             {
@@ -194,5 +193,12 @@ export class TransferTransaction extends SignedTransaction {
             this._transactionController.getTransaction(transactionId)!;
 
         return transactionMeta.transactionParams.hash!;
+    }
+
+    /**
+     * Returns the validated arguments of a transaction call data
+     */
+    public getDataArguments(): void {
+        throw new Error('Method not implemented');
     }
 }

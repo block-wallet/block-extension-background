@@ -25,12 +25,12 @@ import { GasPricesController } from '@blank/background/controllers/GasPricesCont
 import initialState from '@blank/background/utils/constants/initialState';
 import { TypedTransaction } from '@ethereumjs/tx';
 import { getNetworkControllerInstance } from '../mocks/mock-network-instance';
-import BlockUpdatesController from '@blank/background/controllers/BlockUpdatesController';
+import BlockUpdatesController from '@blank/background/controllers/block-updates/BlockUpdatesController';
 import { ExchangeRatesController } from '@blank/background/controllers/ExchangeRatesController';
 import { TornadoEventsService } from '@blank/background/controllers/blank-deposit/tornado/TornadoEventsService';
 import TransactionController from '@blank/background/controllers/transactions/TransactionController';
 import KeyringControllerDerivated from '@blank/background/controllers/KeyringControllerDerivated';
-import BlockFetchController from '@blank/background/controllers/BlockFetchController';
+import BlockFetchController from '@blank/background/controllers/block-updates/BlockFetchController';
 
 describe('Address book controller implementation', function () {
     const accounts = {
@@ -56,20 +56,29 @@ describe('Address book controller implementation', function () {
     let tokenOperationsController: TokenOperationsController;
     let tokenController: TokenController;
     let incomingTransactionController: IncomingTransactionController;
-    let accountTrackerController: AccountTrackerController;
-    let keyringController: KeyringControllerDerivated;
     let blockFetchController: BlockFetchController;
     let blockUpdatesController: BlockUpdatesController;
-    let exchangeRatesController: ExchangeRatesController;
 
     this.beforeAll(() => {
         networkController = getNetworkControllerInstance();
+
+        blockFetchController = new BlockFetchController(networkController, {
+            blockFetchData: {},
+        });
+
+        blockUpdatesController = new BlockUpdatesController(
+            networkController,
+            blockFetchController,
+            { blockData: {} }
+        );
+
         preferencesController = mockPreferencesController;
         permissionsController = mockedPermissionsController;
 
         const gasPricesController = new GasPricesController(
-            initialState.GasPricesController,
-            networkController
+            networkController,
+            blockUpdatesController,
+            initialState.GasPricesController
         );
 
         tokenOperationsController = new TokenOperationsController({
@@ -87,26 +96,13 @@ describe('Address book controller implementation', function () {
             } as TokenControllerProps
         );
 
-        exchangeRatesController = new ExchangeRatesController(
-            {
-                exchangeRates: { ETH: 2786.23, USDT: 1 },
-                networkNativeCurrency: {
-                    symbol: 'ETH',
-                    // Default Coingecko id for ETH rates
-                    coingeckoPlatformId: 'ethereum',
-                },
-            },
-            preferencesController,
-            networkController,
-            () => {
-                return {};
-            }
-        );
         transactionController = new TransactionController(
             networkController,
             preferencesController,
             permissionsController,
             gasPricesController,
+            tokenController,
+            blockUpdatesController,
             {
                 transactions: [],
             },
@@ -115,21 +111,6 @@ describe('Address book controller implementation', function () {
                 return Promise.resolve(ethTx.sign(privateKey));
             },
             { txHistoryLimit: 40 }
-        );
-
-        blockFetchController = new BlockFetchController(networkController, {
-            blockFetchData: {},
-        });
-
-        blockUpdatesController = new BlockUpdatesController(
-            networkController,
-            accountTrackerController,
-            gasPricesController,
-            exchangeRatesController,
-            incomingTransactionController,
-            transactionController,
-            blockFetchController,
-            { blockData: {} }
         );
 
         tornadoEventsService = new TornadoEventsService({
@@ -151,19 +132,10 @@ describe('Address book controller implementation', function () {
             },
             tornadoEventsService,
         });
-        keyringController = new KeyringControllerDerivated({});
-        accountTrackerController = new AccountTrackerController(
-            keyringController,
-            networkController,
-            tokenController,
-            tokenOperationsController,
-            preferencesController,
-            { accounts: {}, isAccountTrackerLoading: false }
-        );
         incomingTransactionController = new IncomingTransactionController(
             networkController,
             preferencesController,
-            accountTrackerController,
+            blockUpdatesController,
             {} as any
         );
         activityListController = new ActivityListController(

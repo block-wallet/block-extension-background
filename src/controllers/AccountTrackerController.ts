@@ -25,8 +25,15 @@ import {
     isSingleCallBalancesContractAvailable,
 } from '../utils/balance-checker/balanceChecker';
 import { cloneDeep } from 'lodash';
-import { Network } from '../utils/constants/networks';
+import {
+    ACTIONS_TIME_INTERVALS_DEFAULT_VALUES,
+    Network,
+} from '../utils/constants/networks';
 import { PreferencesController } from './PreferencesController';
+import BlockUpdatesController, {
+    BlockUpdatesEvents,
+} from './block-updates/BlockUpdatesController';
+import { ActionIntervalController } from './block-updates/ActionIntervalController';
 
 export interface AccountBalanceToken {
     token: Token;
@@ -74,12 +81,15 @@ export interface UpdateAccountsOptions {
 
 export class AccountTrackerController extends BaseController<AccountTrackerState> {
     private readonly _mutex: Mutex;
+    private readonly _balanceFetchIntervalController: ActionIntervalController;
+    private readonly _assetAutoDiscoveryIntervalController: ActionIntervalController;
     constructor(
         private readonly _keyringController: KeyringControllerDerivated,
         private readonly _networkController: NetworkController,
         private readonly _tokenController: TokenController,
         private readonly _tokenOperationsController: TokenOperationsController,
         private readonly _preferencesController: PreferencesController,
+        private readonly _blockUpdatesController: BlockUpdatesController,
         initialState: AccountTrackerState = {
             accounts: {},
             isAccountTrackerLoading: false,
@@ -87,8 +97,13 @@ export class AccountTrackerController extends BaseController<AccountTrackerState
     ) {
         super(initialState);
         this._mutex = new Mutex();
+        this._balanceFetchIntervalController = new ActionIntervalController(
+            this._networkController
+        );
+        this._assetAutoDiscoveryIntervalController =
+            new ActionIntervalController(this._networkController);
 
-        _networkController.on(
+        this._networkController.on(
             NetworkEvents.NETWORK_CHANGE,
             async (network: Network) => {
                 this.store.updateState({ isAccountTrackerLoading: true });
@@ -104,6 +119,13 @@ export class AccountTrackerController extends BaseController<AccountTrackerState
                         addresses: [selectedAddress],
                         assetsAutoDiscovery: false,
                     });
+                    if (
+                        Object.keys(this.store.getState().accounts).length > 1
+                    ) {
+                        this.updateAccounts({
+                            assetsAutoDiscovery: false,
+                        });
+                    }
                 } catch (err) {
                     log.warn(
                         'An error ocurred while updating the accounts',
@@ -114,7 +136,7 @@ export class AccountTrackerController extends BaseController<AccountTrackerState
                 }
             }
         );
-        _tokenController.on(
+        this._tokenController.on(
             TokenControllerEvents.USER_TOKEN_CHANGE,
             async (accountAddress: string) => {
                 try {
@@ -129,6 +151,40 @@ export class AccountTrackerController extends BaseController<AccountTrackerState
                         err.message
                     );
                 }
+            }
+        );
+
+        // Subscription to new blocks
+        this._blockUpdatesController.on(
+            BlockUpdatesEvents.BLOCK_UPDATES_SUBSCRIPTION,
+            async (chainId: number, _: number, newBlockNumber: number) => {
+                const network =
+                    this._networkController.getNetworkFromChainId(chainId);
+                const balanceFetchInterval =
+                    network?.actionsTimeIntervals.balanceFetch ||
+                    ACTIONS_TIME_INTERVALS_DEFAULT_VALUES.balanceFetch;
+
+                this._balanceFetchIntervalController.tick(
+                    balanceFetchInterval,
+                    async () => {
+                        await this.updateAccounts({
+                            assetsAutoDiscovery: false,
+                        });
+                    }
+                );
+
+                const assetsAutoDiscoveryInterval =
+                    network?.actionsTimeIntervals.assetsAutoDiscovery ||
+                    ACTIONS_TIME_INTERVALS_DEFAULT_VALUES.assetsAutoDiscovery;
+
+                this._assetAutoDiscoveryIntervalController.tick(
+                    assetsAutoDiscoveryInterval,
+                    async () => {
+                        await this.updateAccounts({
+                            assetsAutoDiscovery: true,
+                        });
+                    }
+                );
             }
         );
     }

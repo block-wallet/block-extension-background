@@ -1,6 +1,7 @@
 import { BigNumber } from '@ethersproject/bignumber';
 import { BlankSupportedFeatures, FEATURES } from './features';
 import { FeeData } from '@ethersproject/abstract-provider';
+import { Duration, INSTANT, MINUTE, SECOND } from './time';
 
 export type Network = {
     name: string;
@@ -24,7 +25,29 @@ export type Network = {
     rpcUrls: string[];
     blockExplorerUrls?: string[];
     etherscanApiUrl?: string;
-    assetsAutoDiscoveryInterval?: number;
+    actionsTimeIntervals: ActionsTimeInterval;
+};
+
+export interface ActionsTimeInterval {
+    blockNumberPull: Duration; // wait between block pulls
+    balanceFetch: Duration; // native and watched tokens balance feth
+    assetsAutoDiscovery: Duration; // assets auto discovery and balance fetch
+    gasPricesUpdate: Duration; // fee's data update
+    exchangeRatesFetch: Duration; // exchange rates fetch
+    incomingTransactionsUpdate: Duration; // incoming transactions update
+    transactionsStatusesUpdate: Duration; // active transactions statuses update
+    providerSubscriptionsUpdate: Duration; // dapp subscribed to new heads or logs update
+}
+
+export const ACTIONS_TIME_INTERVALS_DEFAULT_VALUES: ActionsTimeInterval = {
+    blockNumberPull: 10 * SECOND,
+    balanceFetch: 15 * SECOND,
+    assetsAutoDiscovery: 1 * MINUTE,
+    gasPricesUpdate: 20 * SECOND,
+    exchangeRatesFetch: 1 * MINUTE,
+    incomingTransactionsUpdate: 15 * SECOND,
+    transactionsStatusesUpdate: 3 * SECOND, // just to avoid a batch of several block updates
+    providerSubscriptionsUpdate: 10 * SECOND,
 };
 
 // TODO: Replace networks object to store them by chainId instead of by name
@@ -53,11 +76,11 @@ export const INITIAL_NETWORKS: Networks = {
         rpcUrls: [`https://mainnet-node.blockwallet.io`],
         blockExplorerUrls: ['https://etherscan.io'],
         etherscanApiUrl: 'https://api.etherscan.io',
-        assetsAutoDiscoveryInterval: 20,
+        actionsTimeIntervals: ACTIONS_TIME_INTERVALS_DEFAULT_VALUES,
     },
     ARBITRUM: {
         name: 'arbitrum',
-        desc: 'Abitrum Mainnet',
+        desc: 'Arbitrum Mainnet',
         chainId: 42161,
         networkVersion: '42161',
         nativeCurrency: {
@@ -75,7 +98,7 @@ export const INITIAL_NETWORKS: Networks = {
         rpcUrls: ['https://arb1.arbitrum.io/rpc'],
         blockExplorerUrls: ['https://arbiscan.io'],
         etherscanApiUrl: 'https://api.arbiscan.io',
-        assetsAutoDiscoveryInterval: 30,
+        actionsTimeIntervals: ACTIONS_TIME_INTERVALS_DEFAULT_VALUES,
     },
     OPTIMISM: {
         name: 'optimism',
@@ -97,7 +120,7 @@ export const INITIAL_NETWORKS: Networks = {
         rpcUrls: ['https://mainnet.optimism.io'],
         blockExplorerUrls: ['https://optimistic.etherscan.io'],
         etherscanApiUrl: 'https://api-optimistic.etherscan.io',
-        assetsAutoDiscoveryInterval: 30,
+        actionsTimeIntervals: ACTIONS_TIME_INTERVALS_DEFAULT_VALUES,
     },
     BSC: {
         name: 'bsc',
@@ -122,7 +145,7 @@ export const INITIAL_NETWORKS: Networks = {
         rpcUrls: ['https://bsc-dataseed1.binance.org:443'],
         blockExplorerUrls: ['https://bscscan.com'],
         etherscanApiUrl: 'https://api.bscscan.com',
-        assetsAutoDiscoveryInterval: 45,
+        actionsTimeIntervals: ACTIONS_TIME_INTERVALS_DEFAULT_VALUES,
     },
     POLYGON: {
         name: 'polygon',
@@ -152,7 +175,7 @@ export const INITIAL_NETWORKS: Networks = {
         rpcUrls: [`https://polygon-node.blockwallet.io`],
         blockExplorerUrls: ['https://polygonscan.com'],
         etherscanApiUrl: 'https://api.polygonscan.com',
-        assetsAutoDiscoveryInterval: 75,
+        actionsTimeIntervals: ACTIONS_TIME_INTERVALS_DEFAULT_VALUES,
     },
     AVALANCHEC: {
         name: 'avalanchec',
@@ -182,6 +205,7 @@ export const INITIAL_NETWORKS: Networks = {
         rpcUrls: [`https://avax-node.blockwallet.io`],
         blockExplorerUrls: ['https://snowtrace.io/'],
         etherscanApiUrl: 'https://api.snowtrace.io/',
+        actionsTimeIntervals: ACTIONS_TIME_INTERVALS_DEFAULT_VALUES,
     },
     FANTOM: {
         name: 'fantom',
@@ -208,9 +232,10 @@ export const INITIAL_NETWORKS: Networks = {
         features: [FEATURES.SENDS],
         ens: false,
         showGasLevels: true,
-        rpcUrls: [`https://rpc.ftm.tools`],
+        rpcUrls: [`https://fantom-node.blockwallet.io`],
         blockExplorerUrls: ['https://ftmscan.com'],
         etherscanApiUrl: 'https://api.ftmscan.com',
+        actionsTimeIntervals: ACTIONS_TIME_INTERVALS_DEFAULT_VALUES,
     },
     GOERLI: {
         name: 'goerli',
@@ -232,7 +257,7 @@ export const INITIAL_NETWORKS: Networks = {
         rpcUrls: [`https://goerli-node.blockwallet.io`],
         blockExplorerUrls: ['https://goerli.etherscan.io'],
         etherscanApiUrl: 'https://api-goerli.etherscan.io',
-        assetsAutoDiscoveryInterval: 30,
+        actionsTimeIntervals: ACTIONS_TIME_INTERVALS_DEFAULT_VALUES,
     },
     ROPSTEN: {
         name: 'ropsten',
@@ -254,7 +279,7 @@ export const INITIAL_NETWORKS: Networks = {
         rpcUrls: [`https://ropsten-node.blockwallet.io`],
         blockExplorerUrls: ['https://ropsten.etherscan.io'],
         etherscanApiUrl: 'https://api-ropsten.etherscan.io',
-        assetsAutoDiscoveryInterval: 30,
+        actionsTimeIntervals: ACTIONS_TIME_INTERVALS_DEFAULT_VALUES,
     },
     KOVAN: {
         name: 'kovan',
@@ -276,7 +301,7 @@ export const INITIAL_NETWORKS: Networks = {
         rpcUrls: [`https://kovan-node.blockwallet.io`],
         blockExplorerUrls: ['https://kovan.etherscan.io'],
         etherscanApiUrl: 'https://api-kovan.etherscan.io',
-        assetsAutoDiscoveryInterval: 30,
+        actionsTimeIntervals: ACTIONS_TIME_INTERVALS_DEFAULT_VALUES,
     },
     RINKEBY: {
         name: 'rinkeby',
@@ -298,7 +323,7 @@ export const INITIAL_NETWORKS: Networks = {
         rpcUrls: [`https://rinkeby-node.blockwallet.io`],
         blockExplorerUrls: ['https://rinkeby.etherscan.io'],
         etherscanApiUrl: 'https://api-rinkeby.etherscan.io',
-        assetsAutoDiscoveryInterval: 30,
+        actionsTimeIntervals: ACTIONS_TIME_INTERVALS_DEFAULT_VALUES,
     },
     BSC_TESTNET: {
         name: 'bsc_testnet',
@@ -322,7 +347,7 @@ export const INITIAL_NETWORKS: Networks = {
         showGasLevels: true,
         rpcUrls: ['https://data-seed-prebsc-1-s1.binance.org:8545/'],
         blockExplorerUrls: ['https://testnet.bscscan.io'],
-        assetsAutoDiscoveryInterval: 75,
+        actionsTimeIntervals: ACTIONS_TIME_INTERVALS_DEFAULT_VALUES,
     },
     POLYGON_TESTNET_MUMBAI: {
         name: 'polygon_testnet_mumbai',
@@ -335,7 +360,7 @@ export const INITIAL_NETWORKS: Networks = {
             decimals: 18,
         },
         iconUrls: [
-            'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/polygon/info/logo.png',
+            'https://polygon.technology/wp-content/uploads/2021/05/matic-token-icon.svg',
         ],
         isCustomNetwork: false,
         gasLowerCap: {
@@ -352,7 +377,7 @@ export const INITIAL_NETWORKS: Networks = {
         rpcUrls: [`https://matic-mumbai.chainstacklabs.com`],
         blockExplorerUrls: ['https://mumbai.polygonscan.com'],
         etherscanApiUrl: 'https://mumbai.polygonscan.com',
-        assetsAutoDiscoveryInterval: 75,
+        actionsTimeIntervals: ACTIONS_TIME_INTERVALS_DEFAULT_VALUES,
     },
     LOCALHOST: {
         name: 'localhost',
@@ -372,7 +397,7 @@ export const INITIAL_NETWORKS: Networks = {
         ens: false,
         showGasLevels: false,
         rpcUrls: ['http://localhost:8545'],
-        assetsAutoDiscoveryInterval: 1,
+        actionsTimeIntervals: ACTIONS_TIME_INTERVALS_DEFAULT_VALUES,
     },
 };
 

@@ -60,7 +60,10 @@ import {
 } from '../infrastructure/connection';
 import { normalizeMessageData, validateSignature } from '../utils/signature';
 import { hexValue } from 'ethers/lib/utils';
-import { Network } from '../utils/constants/networks';
+import {
+    ACTIONS_TIME_INTERVALS_DEFAULT_VALUES,
+    Network,
+} from '../utils/constants/networks';
 import { validateWatchAssetReq } from '../utils/token';
 import { TokenController } from './erc-20/TokenController';
 import { Token } from './erc-20/Token';
@@ -70,12 +73,13 @@ import KeyringControllerDerivated from './KeyringControllerDerivated';
 import { randomBytes } from '../utils/randomBytes';
 import BlockUpdatesController, {
     BlockUpdatesEvents,
-} from './BlockUpdatesController';
+} from './block-updates/BlockUpdatesController';
 import { Filter } from '@ethersproject/abstract-provider';
 import {
     parseBlock,
     validateLogSubscriptionRequest,
 } from '../utils/subscriptions';
+import { ActionIntervalController } from './block-updates/ActionIntervalController';
 
 export enum BlankProviderEvents {
     SUBSCRIPTION_UPDATE = 'SUBSCRIPTION_UPDATE',
@@ -94,6 +98,7 @@ export interface BlankProviderControllerState {
  *
  */
 export default class BlankProviderController extends BaseController<BlankProviderControllerState> {
+    private readonly _providerSubscriptionUpdateIntervalController: ActionIntervalController;
     private _unlockHandlers: Handler[];
     private _requestHandlers: Handlers;
     private _activeSubscriptions: ActiveSubscriptions;
@@ -109,6 +114,8 @@ export default class BlankProviderController extends BaseController<BlankProvide
     ) {
         super({ dappRequests: {} });
 
+        this._providerSubscriptionUpdateIntervalController =
+            new ActionIntervalController(this._networkController);
         this._unlockHandlers = [];
         this._requestHandlers = {};
         this._activeSubscriptions = {};
@@ -163,13 +170,23 @@ export default class BlankProviderController extends BaseController<BlankProvide
         previousBlockNumber: number,
         newBlockNumber: number
     ): void => {
-        for (const subscriptionId in this._activeSubscriptions) {
-            this._activeSubscriptions[subscriptionId].notification(
-                chainId,
-                previousBlockNumber,
-                newBlockNumber
-            );
-        }
+        const network = this._networkController.getNetworkFromChainId(chainId);
+        const interval =
+            network?.actionsTimeIntervals.providerSubscriptionsUpdate ||
+            ACTIONS_TIME_INTERVALS_DEFAULT_VALUES.providerSubscriptionsUpdate;
+
+        this._providerSubscriptionUpdateIntervalController.tick(
+            interval,
+            async () => {
+                for (const subscriptionId in this._activeSubscriptions) {
+                    this._activeSubscriptions[subscriptionId].notification(
+                        chainId,
+                        previousBlockNumber,
+                        newBlockNumber
+                    );
+                }
+            }
+        );
     };
 
     /**
@@ -859,7 +876,7 @@ export default class BlankProviderController extends BaseController<BlankProvide
         // Check if it is an ERC20 asset
         if (params.type !== 'ERC20') {
             throw new Error(
-                'Blank wallet only supports ERC20 tokens with wallet_watchAsset'
+                'wallet_watchAsset is only enabled for ERC20 assets'
             );
         }
 
@@ -882,29 +899,22 @@ export default class BlankProviderController extends BaseController<BlankProvide
             this._permissionsController.getAccounts(instance.origin)[0];
 
         // Check if token already exists on user profile
-        const tokenSearchResult = await this._tokenController.search(
-            validParams.address,
-            false,
-            activeAccount,
-            chainId,
-            true
-        );
+        const tokenSearchResult = (
+            await this._tokenController.getUserTokens(activeAccount, chainId)
+        )[validParams.address];
 
         if (
-            tokenSearchResult.length &&
-            // Check if the result is a populated token
-            tokenSearchResult[0].name !== '' &&
-            tokenSearchResult[0].decimals !== 0 &&
-            tokenSearchResult[0].symbol !== ''
+            tokenSearchResult &&
+            tokenSearchResult.address === validParams.address
         ) {
             // Warn about update
             isUpdate = true;
             // Set saved token parameters
             savedToken = {
-                address: tokenSearchResult[0].address,
-                symbol: tokenSearchResult[0].symbol,
-                decimals: tokenSearchResult[0].decimals,
-                image: tokenSearchResult[0].logo,
+                address: tokenSearchResult.address,
+                symbol: tokenSearchResult.symbol,
+                decimals: tokenSearchResult.decimals,
+                image: tokenSearchResult.logo,
             };
         }
 
@@ -923,16 +933,14 @@ export default class BlankProviderController extends BaseController<BlankProvide
                     throw new Error('Missing updated token parameters');
                 }
 
-                const updatedParams = confirmOptions as WatchAssetConfirmParams;
-
                 await this._tokenController.addCustomToken(
                     new Token(
                         validParams.address,
-                        updatedParams.symbol,
-                        updatedParams.symbol,
-                        updatedParams.decimals,
+                        confirmOptions.symbol,
+                        confirmOptions.symbol,
+                        confirmOptions.decimals,
                         'ERC20',
-                        updatedParams.image
+                        confirmOptions.image
                     ),
                     activeAccount
                 );

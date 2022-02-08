@@ -33,7 +33,7 @@ import {
 import { BlankProviderControllerState } from '@blank/background/controllers/BlankProviderController';
 import { IAccountTokens } from '@blank/background/controllers/erc-20/Token';
 import { NetworkControllerState } from '../../controllers/NetworkController';
-import { BlockUpdatesControllerState } from '@blank/background/controllers/BlockUpdatesController';
+import { BlockUpdatesControllerState } from '@blank/background/controllers/block-updates/BlockUpdatesController';
 import {
     TransactionControllerState,
     TransactionVolatileControllerState,
@@ -41,7 +41,7 @@ import {
 import {
     BlockFetchControllerState,
     BLOCKS_TO_WAIT_BEFORE_CHECHKING_FOR_CHAIN_SUPPORT,
-} from '../../controllers/BlockFetchController';
+} from '../../controllers/block-updates/BlockFetchController';
 
 export type BlankAppState = {
     AccountTrackerController: AccountTrackerState;
@@ -129,7 +129,12 @@ const initialState: BlankAppState = {
         showTestNetworks: false,
         popupTab: 'activity',
         settings: {
-            hideAddressWarning: false, // Shown by default
+            hideAddressWarning: false, // Shown by default,
+            subscribedToReleaseaNotes: true,
+        },
+        releaseNotesSettings: {
+            lastVersionUserSawNews: '0.1.3',
+            latestReleaseNotes: [],
         },
     },
     TransactionController: {

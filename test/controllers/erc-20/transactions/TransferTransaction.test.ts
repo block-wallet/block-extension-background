@@ -24,9 +24,9 @@ import PermissionsController from '@blank/background/controllers/PermissionsCont
 import { GasPricesController } from '@blank/background/controllers/GasPricesController';
 import { TypedTransaction } from '@ethereumjs/tx';
 import { getNetworkControllerInstance } from '../../../mocks/mock-network-instance';
-import { mockKeyringController } from '../../../mocks/mock-keyring-controller';
-import { AccountTrackerController } from '@blank/background/controllers/AccountTrackerController';
 import TransactionController from '@blank/background/controllers/transactions/TransactionController';
+import BlockUpdatesController from '@blank/background/controllers/block-updates/BlockUpdatesController';
+import BlockFetchController from '@blank/background/controllers/block-updates/BlockFetchController';
 
 describe('TransferTransaction implementation', function () {
     const daiAddress = '0xdc31Ee1784292379Fbb2964b3B9C4124D8F89C60';
@@ -47,36 +47,38 @@ describe('TransferTransaction implementation', function () {
     let preferencesController: PreferencesController;
     let transactionController: TransactionController;
     let gasPricesController: GasPricesController;
+    let blockUpdatesController: BlockUpdatesController;
     let tokenController: TokenController;
-    let tokenOperationsController: TokenOperationsController;
-    let accountTrackerController: AccountTrackerController;
-
     let permissionsController: PermissionsController;
     beforeEach(() => {
         networkController = getNetworkControllerInstance();
+        blockUpdatesController = new BlockUpdatesController(
+            networkController,
+            new BlockFetchController(networkController, {
+                blockFetchData: {},
+            }),
+            { blockData: {} }
+        );
         preferencesController = mockPreferencesController;
         permissionsController = mockedPermissionsController;
         gasPricesController = new GasPricesController(
-            initialState.GasPricesController,
-            networkController
+            networkController,
+            blockUpdatesController,
+            initialState.GasPricesController
         );
 
-        tokenOperationsController = new TokenOperationsController({
-            networkController,
-        });
-
-        tokenController = new TokenController(initialState.TokenController, {
-            networkController,
-            preferencesController,
-            tokenOperationsController,
-        });
-
-        accountTrackerController = new AccountTrackerController(
-            mockKeyringController,
-            networkController,
-            tokenController,
-            tokenOperationsController,
-            preferencesController
+        tokenController = new TokenController(
+            {
+                userTokens: {} as any,
+                deletedUserTokens: {} as any,
+            },
+            {
+                networkController,
+                preferencesController: preferencesController,
+                tokenOperationsController: new TokenOperationsController({
+                    networkController: networkController,
+                }),
+            }
         );
 
         transactionController = new TransactionController(
@@ -84,6 +86,8 @@ describe('TransferTransaction implementation', function () {
             preferencesController,
             permissionsController,
             gasPricesController,
+            tokenController,
+            blockUpdatesController,
             {
                 transactions: [],
             },
@@ -97,7 +101,13 @@ describe('TransferTransaction implementation', function () {
         transferTransaction = new TransferTransaction({
             transactionController,
             preferencesController,
-            tokenController,
+            tokenController: new TokenController(initialState.TokenController, {
+                networkController,
+                preferencesController,
+                tokenOperationsController: new TokenOperationsController({
+                    networkController,
+                }),
+            }),
             networkController,
         });
     });

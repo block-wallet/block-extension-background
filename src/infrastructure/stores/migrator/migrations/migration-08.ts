@@ -1,4 +1,5 @@
 import { BlankAppState } from '@blank/background/utils/constants/initialState';
+import { ACTIONS_TIME_INTERVALS_DEFAULT_VALUES } from '../../../../utils/constants/networks';
 import { IMigration } from '../IMigration';
 
 /**
@@ -52,7 +53,7 @@ export default {
             rpcUrls: [`https://matic-mumbai.chainstacklabs.com`],
             blockExplorerUrls: ['https://mumbai.polygonscan.com'],
             etherscanApiUrl: 'https://mumbai.polygonscan.com',
-            assetsAutoDiscoveryInterval: 75,
+            actionsTimeIntervals: ACTIONS_TIME_INTERVALS_DEFAULT_VALUES,
         };
 
         updatedNetworks.LOCALHOST = {

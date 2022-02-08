@@ -8,13 +8,10 @@ import { GasPricesController } from '@blank/background/controllers/GasPricesCont
 import initialState from '@blank/background/utils/constants/initialState';
 import { TypedTransaction } from '@ethereumjs/tx';
 import { getNetworkControllerInstance } from '../mocks/mock-network-instance';
-import { AccountTrackerController } from '@blank/background/controllers/AccountTrackerController';
-import {
-    TokenController,
-    TokenControllerProps,
-} from '@blank/background/controllers/erc-20/TokenController';
 import TransactionController from '@blank/background/controllers/transactions/TransactionController';
-import KeyringControllerDerivated from '@blank/background/controllers/KeyringControllerDerivated';
+import BlockUpdatesController from '@blank/background/controllers/block-updates/BlockUpdatesController';
+import BlockFetchController from '@blank/background/controllers/block-updates/BlockFetchController';
+import { TokenController } from '@blank/background/controllers/erc-20/TokenController';
 
 const mnemonic =
     'reject hood palace sad female review depth camp clown peace social real behave rib ability cereal grab illness settle process gate lizard uniform glimpse';
@@ -35,22 +32,27 @@ const accounts = {
 const preferencesController = mockPreferencesController;
 const permissionsController = mockedPermissionsController;
 let transactionController: TransactionController;
-let accountTrackerController: AccountTrackerController;
+let blockUpdatesController: BlockUpdatesController;
 let tokenController: TokenController;
-let keyringController: KeyringControllerDerivated;
 
 describe.skip('Swap Controller', () => {
     const networkController = getNetworkControllerInstance();
+    blockUpdatesController = new BlockUpdatesController(
+        networkController,
+        new BlockFetchController(networkController, {
+            blockFetchData: {},
+        }),
+        { blockData: {} }
+    );
 
     const gasPricesController = new GasPricesController(
-        initialState.GasPricesController,
-        networkController
+        networkController,
+        blockUpdatesController,
+        initialState.GasPricesController
     );
     const tokenOperationsController = new TokenOperationsController({
         networkController: networkController,
     });
-
-    keyringController = new KeyringControllerDerivated({});
 
     tokenController = new TokenController(
         {
@@ -58,19 +60,12 @@ describe.skip('Swap Controller', () => {
             deletedUserTokens: {} as any,
         },
         {
-            tokenOperationsController: tokenOperationsController,
+            networkController,
             preferencesController: preferencesController,
-            networkController: networkController,
-        } as TokenControllerProps
-    );
-
-    accountTrackerController = new AccountTrackerController(
-        keyringController,
-        networkController,
-        tokenController,
-        tokenOperationsController,
-        preferencesController,
-        { accounts: {}, isAccountTrackerLoading: false }
+            tokenOperationsController: new TokenOperationsController({
+                networkController: networkController,
+            }),
+        }
     );
 
     transactionController = new TransactionController(
@@ -78,6 +73,8 @@ describe.skip('Swap Controller', () => {
         preferencesController,
         permissionsController,
         gasPricesController,
+        tokenController,
+        blockUpdatesController,
         {
             transactions: [],
         },

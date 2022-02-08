@@ -452,7 +452,10 @@ export class BlankDepositVault {
                 },
             });
         } catch (error) {
-            log.error('Unexpected error while reconstructing user deposits');
+            log.error(
+                'Unexpected error while reconstructing user deposits',
+                error
+            );
         } finally {
             if (releaseMutexLock) {
                 releaseMutexLock();

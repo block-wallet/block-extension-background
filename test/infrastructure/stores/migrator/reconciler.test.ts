@@ -133,7 +133,7 @@ const initialState: BlankAppState & {
         },
     },
     BlockUpdatesController: {
-        blockData: { 5: { blockNumber: -1, updateCounter: -1 } },
+        blockData: { 5: { blockNumber: -1 } },
     },
     AddressBookController: {
         addressBook: {} as AddressBook,
@@ -178,7 +178,14 @@ const initialState: BlankAppState & {
         newAddedKeyOnLevel2: '',
         showTestNetworks: false,
         popupTab: 'activity',
-        settings: { hideAddressWarning: false },
+        settings: {
+            hideAddressWarning: false,
+            subscribedToReleaseaNotes: true,
+        },
+        releaseNotesSettings: {
+            lastVersionUserSawNews: '0.1.3',
+            latestReleaseNotes: [],
+        },
     },
     TransactionController: {
         transactions: [],
@@ -353,7 +360,12 @@ describe('State reconciler', () => {
                 showWelcomeMessage: false,
                 popupTab: 'activity',
                 settings: {
+                    subscribedToReleaseaNotes: true,
                     hideAddressWarning: false,
+                },
+                releaseNotesSettings: {
+                    lastVersionUserSawNews: '0.1.3',
+                    latestReleaseNotes: [],
                 },
             },
             TransactionController: {

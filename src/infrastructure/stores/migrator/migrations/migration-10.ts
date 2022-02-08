@@ -1,6 +1,6 @@
 import { BlankAppState } from '@blank/background/utils/constants/initialState';
+import { ACTIONS_TIME_INTERVALS_DEFAULT_VALUES } from '../../../../utils/constants/networks';
 import { IMigration } from '../IMigration';
-import { BigNumber } from 'ethers';
 
 /**
  * This migration adds the fantom network to the networks
@@ -38,6 +38,7 @@ export default {
             rpcUrls: [`https://rpc.ftm.tools`],
             blockExplorerUrls: ['https://ftmscan.com'],
             etherscanApiUrl: 'https://api.ftmscan.com',
+            actionsTimeIntervals: ACTIONS_TIME_INTERVALS_DEFAULT_VALUES,
         };
 
         updatedNetworks.GOERLI = {
@@ -45,7 +46,7 @@ export default {
             order: 8,
         };
 
-        updatedNetworks.ROSPTEN = {
+        updatedNetworks.ROPSTEN = {
             ...updatedNetworks.ROPSTEN,
             order: 9,
         };

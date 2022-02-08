@@ -4,12 +4,20 @@ import { BaseController } from '../infrastructure/BaseController';
 import { Token } from './erc-20/Token';
 import checksummedAddress from '../utils/checksummedAddress';
 import NetworkController, { NetworkEvents } from './NetworkController';
-import { Network } from '../utils/constants/networks';
+import {
+    ACTIONS_TIME_INTERVALS_DEFAULT_VALUES,
+    Network,
+} from '../utils/constants/networks';
 
 import ratesList from '../../rates-ids-list.json';
 import assetPlatfomsList from '../../asset-platforms-ids-list.json';
 
 import axios from 'axios';
+import { ActionIntervalController } from './block-updates/ActionIntervalController';
+import BlockUpdatesController, {
+    BlockUpdatesEvents,
+} from './block-updates/BlockUpdatesController';
+import { currentTimestamp } from '../utils/constants/time';
 
 export interface ExchangeRatesControllerState {
     exchangeRates: Rates;
@@ -44,11 +52,13 @@ export class ExchangeRatesController extends BaseController<ExchangeRatesControl
             token: { symbol: 'WBTC' } as Token,
         },
     };
+    private readonly _exchangeRateFetchIntervalController: ActionIntervalController;
 
     constructor(
         initState: ExchangeRatesControllerState,
         private readonly _preferencesController: PreferencesController,
-        _networkController: NetworkController,
+        private readonly _networkController: NetworkController,
+        private readonly _blockUpdatesController: BlockUpdatesController,
         private readonly getTokens: () => {
             [address: string]: {
                 token: Token;
@@ -57,9 +67,34 @@ export class ExchangeRatesController extends BaseController<ExchangeRatesControl
     ) {
         super(initState);
 
-        _networkController.on(
+        this._exchangeRateFetchIntervalController =
+            new ActionIntervalController(this._networkController);
+
+        this._networkController.on(
             NetworkEvents.NETWORK_CHANGE,
-            this.updateNetworkNativeCurrencyId
+            (network: Network) => {
+                this.updateNetworkNativeCurrencyId(network);
+                this.updateExchangeRates();
+            }
+        );
+
+        // Subscription to new blocks
+        this._blockUpdatesController.on(
+            BlockUpdatesEvents.BLOCK_UPDATES_SUBSCRIPTION,
+            async (chainId: number) => {
+                const network =
+                    this._networkController.getNetworkFromChainId(chainId);
+                const interval =
+                    network?.actionsTimeIntervals.exchangeRatesFetch ||
+                    ACTIONS_TIME_INTERVALS_DEFAULT_VALUES.exchangeRatesFetch;
+
+                this._exchangeRateFetchIntervalController.tick(
+                    interval,
+                    async () => {
+                        await this.updateExchangeRates();
+                    }
+                );
+            }
         );
     }
 
@@ -70,7 +105,10 @@ export class ExchangeRatesController extends BaseController<ExchangeRatesControl
         let coingeckoPlatformId = DEFAULT_NETWORK_CURRENCY_ID;
 
         if (chainId in assetPlatfomsList) {
-            coingeckoPlatformId = assetPlatfomsList[String(chainId) as keyof typeof assetPlatfomsList];
+            coingeckoPlatformId =
+                assetPlatfomsList[
+                    String(chainId) as keyof typeof assetPlatfomsList
+                ];
         } else if (symbol in ratesList) {
             coingeckoPlatformId = ratesList[symbol as keyof typeof ratesList];
         }
@@ -95,7 +133,10 @@ export class ExchangeRatesController extends BaseController<ExchangeRatesControl
         const { symbol } = this.networkNativeCurrency;
         // Rates format: {[tokenTicker]: [price: number]}
         const rates = this.store.getState().exchangeRates;
-        const currencyApiId = ratesList[this.networkNativeCurrency.symbol as keyof typeof ratesList]
+        const currencyApiId =
+            ratesList[
+                this.networkNativeCurrency.symbol as keyof typeof ratesList
+            ];
 
         // Get network native currency rate
         const nativeCurrencyRates = (
@@ -167,7 +208,10 @@ export class ExchangeRatesController extends BaseController<ExchangeRatesControl
         [nativeCurrency: string]: { [vsCurrency: string]: number };
     }> => {
         const query = `${this.baseApiEndpoint}price`;
-        const currencyApiId = ratesList[this.networkNativeCurrency.symbol as keyof typeof ratesList]
+        const currencyApiId =
+            ratesList[
+                this.networkNativeCurrency.symbol as keyof typeof ratesList
+            ];
 
         const response = await axios.get(query, {
             params: {

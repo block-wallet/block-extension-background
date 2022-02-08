@@ -6,7 +6,6 @@ import {
     StaticJsonRpcProvider,
     TransactionReceipt,
 } from '@ethersproject/providers';
-import { Interface } from '@ethersproject/abi';
 import log from 'loglevel';
 import {
     addHexPrefix,
@@ -49,12 +48,19 @@ import {
     ContractMethodSignature,
     SignatureRegistry,
 } from './SignatureRegistry';
-import erc20Abi from '../erc-20/abi';
 import { DEFAULT_TORNADO_CONFIRMATION } from '../blank-deposit/tornado/TornadoService';
 import { BaseController } from '../../infrastructure/BaseController';
 import { showTransactionNotification } from '../../utils/notifications';
 import { reverse } from '../../utils/array';
 import axios from 'axios';
+import { TokenController } from '../erc-20/TokenController';
+import { ApproveTransaction } from '../erc-20/transactions/ApproveTransaction';
+import { SignedTransaction } from '../erc-20/transactions/SignedTransaction';
+import { ActionIntervalController } from '../block-updates/ActionIntervalController';
+import BlockUpdatesController, {
+    BlockUpdatesEvents,
+} from '../block-updates/BlockUpdatesController';
+import { ACTIONS_TIME_INTERVALS_DEFAULT_VALUES } from '../../utils/constants/networks';
 
 /**
  * It indicates the amount of blocks to wait after marking
@@ -190,6 +196,7 @@ export class TransactionController extends BaseController<
     TransactionControllerState,
     TransactionVolatileControllerState
 > {
+    private readonly _transactionStatusesUpdateIntervalController: ActionIntervalController;
     private mutex = new Mutex();
 
     /**
@@ -199,7 +206,6 @@ export class TransactionController extends BaseController<
 
     private readonly _signatureRegistry: SignatureRegistry;
     private readonly _nonceTracker: NonceTracker;
-    private readonly _erc20Abi: Interface;
 
     /**
      * Creates a TransactionController instance.
@@ -214,6 +220,8 @@ export class TransactionController extends BaseController<
         private readonly _preferencesController: PreferencesController,
         private readonly _permissionsController: PermissionsController,
         private readonly _gasPricesController: GasPricesController,
+        private readonly _tokenController: TokenController,
+        private readonly _blockUpdatesController: BlockUpdatesController,
         initialState: TransactionControllerState,
         /**
          * Method used to sign transactions
@@ -229,6 +237,9 @@ export class TransactionController extends BaseController<
         }
     ) {
         super(initialState);
+
+        this._transactionStatusesUpdateIntervalController =
+            new ActionIntervalController(this._networkController);
 
         this._nonceTracker = new NonceTracker(
             _networkController,
@@ -255,9 +266,6 @@ export class TransactionController extends BaseController<
         // Instantiate signature registry service
         this._signatureRegistry = new SignatureRegistry(_networkController);
 
-        // Instantiate the ERC20 interface to decode function names
-        this._erc20Abi = new Interface(erc20Abi);
-
         // Clear unapproved & approved non-submitted transactions
         this.clearUnapprovedTransactions();
         this.wipeApprovedTransactions();
@@ -275,6 +283,27 @@ export class TransactionController extends BaseController<
         this.hub.on(TransactionEvents.STATUS_UPDATE, (transactionMeta) => {
             this.emit(TransactionEvents.STATUS_UPDATE, transactionMeta);
         });
+
+        // Subscription to new blocks
+        this._blockUpdatesController.on(
+            BlockUpdatesEvents.BACKGROUND_AVAILABLE_BLOCK_UPDATES_SUBSCRIPTION,
+            async (chainId: number, _: number, newBlockNumber: number) => {
+                const network =
+                    this._networkController.getNetworkFromChainId(chainId);
+                const interval =
+                    network?.actionsTimeIntervals.transactionsStatusesUpdate ||
+                    ACTIONS_TIME_INTERVALS_DEFAULT_VALUES.transactionsStatusesUpdate;
+
+                this._transactionStatusesUpdateIntervalController.tick(
+                    interval,
+                    async () => {
+                        await this.update(newBlockNumber);
+                    }
+                );
+            }
+        );
+
+        this.setBackgroundAvailableActiveSubscriptions();
 
         // Show browser notification on transaction status update
         this.subscribeNotifications();
@@ -294,6 +323,12 @@ export class TransactionController extends BaseController<
                 .transactions.filter((t) => t.chainId === chainId),
             unapprovedTransactions: this.getExternalUnapprovedTransactions(),
         });
+
+        /**
+         * On transaction store update, update whether we should keep updating the
+         * transactions
+         */
+        this.setBackgroundAvailableActiveSubscriptions();
     };
 
     /**
@@ -333,6 +368,19 @@ export class TransactionController extends BaseController<
                     showTransactionNotification(transactionMeta);
                 }
             }
+        );
+    }
+
+    /**
+     * Updates block updates controller subscription
+     * */
+    private setBackgroundAvailableActiveSubscriptions() {
+        this._blockUpdatesController.setBackgroundAvailableActiveSubscriptions(
+            this.UIStore.getState().transactions
+                ? this.UIStore.getState().transactions.some(
+                      ({ verifiedOnBlockchain }) => !verifiedOnBlockchain
+                  )
+                : false
         );
     }
 
@@ -431,7 +479,9 @@ export class TransactionController extends BaseController<
         if (customCategory) {
             transactionCategory = customCategory;
         } else if (transaction.data) {
-            transactionCategory = this.checkPresetCategories(transaction.data);
+            transactionCategory = SignedTransaction.checkPresetCategories(
+                transaction.data
+            );
         }
 
         let transactionMeta: TransactionMeta = {
@@ -459,6 +509,37 @@ export class TransactionController extends BaseController<
         }
 
         try {
+            // Check for ERC20 approval
+            if (
+                transactionCategory ===
+                TransactionCategories.TOKEN_METHOD_APPROVE
+            ) {
+                const erc20Approve = new ApproveTransaction({
+                    networkController: this._networkController,
+                    transactionController: this,
+                    preferencesController: this._preferencesController,
+                });
+
+                // Get decimals
+                const tokenData = await this._tokenController.search(
+                    transaction.to!
+                );
+
+                if (!tokenData[0] || !tokenData[0].decimals) {
+                    throw new Error('Failed fetching token data');
+                }
+
+                // Get allowance
+                const { _value } = erc20Approve.getDataArguments(
+                    transaction.data!
+                );
+
+                transactionMeta.advancedData = {
+                    decimals: tokenData[0].decimals,
+                    allowance: _value._hex,
+                };
+            }
+
             // Estimate gas
             const { gasLimit, estimationSucceeded } = await this.estimateGas(
                 transactionMeta
@@ -1198,7 +1279,29 @@ export class TransactionController extends BaseController<
         if (index < 0) return;
 
         // Update transaction
-        const { status: oldStatus } = transactions[index];
+        const { status: oldStatus, advancedData } = transactions[index];
+
+        // Check for token allowance update
+        if (
+            transactionMeta.transactionCategory ===
+                TransactionCategories.TOKEN_METHOD_APPROVE &&
+            transactionMeta.advancedData?.allowance &&
+            advancedData?.allowance !== transactionMeta.advancedData?.allowance
+        ) {
+            const erc20Approve = new ApproveTransaction({
+                networkController: this._networkController,
+                transactionController: this,
+                preferencesController: this._preferencesController,
+            });
+
+            const txData = erc20Approve.getDataForCustomAllowance(
+                transactionMeta.transactionParams.data!,
+                transactionMeta.advancedData?.allowance
+            );
+
+            transactionMeta.transactionParams.data = txData;
+        }
+
         transactions[index] = transactionMeta;
 
         this.store.updateState({
@@ -1763,33 +1866,6 @@ export class TransactionController extends BaseController<
                     t.chainId === fromChainId
             );
     };
-
-    /**
-     * checkPresetCategories
-     *
-     * Checks if the passed data corresponds to one of the preset categories
-     *
-     * @returns The preset category if it exists, otherwise undefined
-     */
-    public checkPresetCategories(
-        data: string
-    ): TransactionCategories | undefined {
-        let name: string | undefined;
-
-        try {
-            name = data && this._erc20Abi.parseTransaction({ data }).name;
-        } catch (error) {
-            log.debug('Failed to parse transaction data.', error, data);
-        }
-
-        const tokenMethodName = [
-            TransactionCategories.TOKEN_METHOD_APPROVE,
-            TransactionCategories.TOKEN_METHOD_TRANSFER,
-            TransactionCategories.TOKEN_METHOD_TRANSFER_FROM,
-        ].find((methodName) => methodName === name && name.toLowerCase());
-
-        return tokenMethodName;
-    }
 
     /**
      * determineTransactionCategory

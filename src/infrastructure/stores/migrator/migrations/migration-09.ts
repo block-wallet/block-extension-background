@@ -1,6 +1,7 @@
 import { BlankAppState } from '@blank/background/utils/constants/initialState';
 import { IMigration } from '../IMigration';
 import { BigNumber } from 'ethers';
+import { ACTIONS_TIME_INTERVALS_DEFAULT_VALUES } from '../../../../utils/constants/networks';
 
 /**
  * This migration adds the avalanche c network to the networks
@@ -38,6 +39,7 @@ export default {
             rpcUrls: [`https://avax-node.blockwallet.io`],
             blockExplorerUrls: ['https://snowtrace.io/'],
             etherscanApiUrl: 'https://api.snowtrace.io/',
+            actionsTimeIntervals: ACTIONS_TIME_INTERVALS_DEFAULT_VALUES,
         };
 
         updatedNetworks.GOERLI = {
@@ -45,7 +47,7 @@ export default {
             order: 7,
         };
 
-        updatedNetworks.ROSPTEN = {
+        updatedNetworks.ROPSTEN = {
             ...updatedNetworks.ROPSTEN,
             order: 8,
         };

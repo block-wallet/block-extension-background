@@ -2,8 +2,7 @@ import { IAccountTokens, ITokens, Token } from './Token';
 import { BaseController } from '../../infrastructure/BaseController';
 import NetworkController from '../NetworkController';
 import NETWORK_TOKENS_LIST, {
-    BLANK_TOKEN_ADDRESSES,
-    BLANK_TOKEN_NAME,
+    getGoBlankTokenDataByChainId,
     NETWORK_TOKENS_LIST_ARRAY,
 } from './TokenList';
 import { isHexPrefixed, toChecksumAddress } from 'ethereumjs-util';
@@ -99,9 +98,8 @@ export class TokenController extends BaseController<TokenControllerState> {
         accountAddress?: string,
         chainId: number = this.getSelectedNetworkChainId()
     ): Promise<void> {
-        if (chainId in BLANK_TOKEN_ADDRESSES) {
-            const _blank_token_address = BLANK_TOKEN_ADDRESSES[chainId];
-
+        const goBlankToken = getGoBlankTokenDataByChainId(chainId);
+        if (goBlankToken) {
             const userTokensAddresses =
                 await this.getUserTokenContractAddresses(
                     accountAddress,
@@ -114,18 +112,18 @@ export class TokenController extends BaseController<TokenControllerState> {
                 );
 
             if (
-                !userTokensAddresses.includes(_blank_token_address) &&
-                !userDeletedTokenAddresses.includes(_blank_token_address)
+                !userTokensAddresses.includes(goBlankToken.address) &&
+                !userDeletedTokenAddresses.includes(goBlankToken.address)
             ) {
                 const blankToken =
                     (await this.getToken(
-                        _blank_token_address,
+                        goBlankToken.address,
                         accountAddress,
                         chainId
                     )) ||
                     (
                         await this.search(
-                            BLANK_TOKEN_NAME,
+                            goBlankToken.symbol,
                             true,
                             accountAddress,
                             chainId
@@ -336,9 +334,18 @@ export class TokenController extends BaseController<TokenControllerState> {
             userTokens[key].symbol.toLowerCase()
         );
 
-        const cleanedTokens = tokens.filter(
-            (token) => !userSymbols.includes(token.symbol.toLowerCase())
-        );
+        const cleanedTokens = tokens.filter((token) => {
+            if (userSymbols.includes(token.symbol.toLowerCase())) {
+                const tokenAddress = toChecksumAddress(token.address);
+
+                // Check if it's a token update
+                if (userTokens[tokenAddress].address !== tokenAddress) {
+                    return false;
+                }
+            }
+
+            return true;
+        });
 
         for (let i = 0; i < cleanedTokens.length; i++) {
             const tokenAddress = toChecksumAddress(cleanedTokens[i].address);

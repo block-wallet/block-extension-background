@@ -153,14 +153,15 @@ import {
     openExtensionInBrowser,
     switchToTab,
     closeTab,
+    getVersion,
 } from '../utils/window';
 import log from 'loglevel';
-import BlockUpdatesController from './BlockUpdatesController';
+import BlockUpdatesController from './block-updates/BlockUpdatesController';
 import { TornadoEventsService } from './blank-deposit/tornado/TornadoEventsService';
 
 import tornadoConfig from './blank-deposit/tornado/config/config';
 import ComposedStore from '../infrastructure/stores/ComposedStore';
-import BlockFetchController from './BlockFetchController';
+import BlockFetchController from './block-updates/BlockFetchController';
 
 export interface BlankControllerProps {
     initState: BlankAppState;
@@ -230,6 +231,17 @@ export default class BlankController extends EventEmitter {
             initState.NetworkController
         );
 
+        this.blockFetchController = new BlockFetchController(
+            this.networkController,
+            initState.BlockFetchController
+        );
+
+        this.blockUpdatesController = new BlockUpdatesController(
+            this.networkController,
+            this.blockFetchController,
+            initState.BlockUpdatesController
+        );
+
         this.keyringController = new KeyringControllerDerivated({
             initState: initState.KeyringController,
             encryptor: props.encryptor || undefined,
@@ -245,8 +257,9 @@ export default class BlankController extends EventEmitter {
         );
 
         this.gasPricesController = new GasPricesController(
-            initState.GasPricesController,
-            this.networkController
+            this.networkController,
+            this.blockUpdatesController,
+            initState.GasPricesController
         );
 
         this.tokenOperationsController = new TokenOperationsController({
@@ -268,6 +281,7 @@ export default class BlankController extends EventEmitter {
             initState.ExchangeRatesController,
             this.preferencesController,
             this.networkController,
+            this.blockUpdatesController,
             () => {
                 return this.accountTrackerController.getAccountTokens(
                     this.preferencesController.getSelectedAddress()
@@ -281,13 +295,14 @@ export default class BlankController extends EventEmitter {
             this.tokenController,
             this.tokenOperationsController,
             this.preferencesController,
+            this.blockUpdatesController,
             initState.AccountTrackerController
         );
 
         this.incomingTransactionController = new IncomingTransactionController(
             this.networkController,
             this.preferencesController,
-            this.accountTrackerController,
+            this.blockUpdatesController,
             initState.IncomingTransactionController
         );
 
@@ -296,24 +311,10 @@ export default class BlankController extends EventEmitter {
             this.preferencesController,
             this.permissionsController,
             this.gasPricesController,
+            this.tokenController,
+            this.blockUpdatesController,
             initState.TransactionController,
             this.keyringController.signTransaction.bind(this.keyringController)
-        );
-
-        this.blockFetchController = new BlockFetchController(
-            this.networkController,
-            initState.BlockFetchController
-        );
-
-        this.blockUpdatesController = new BlockUpdatesController(
-            this.networkController,
-            this.accountTrackerController,
-            this.gasPricesController,
-            this.exchangeRatesController,
-            this.incomingTransactionController,
-            this.transactionController,
-            this.blockFetchController,
-            initState.BlockUpdatesController
         );
 
         this.swapController = new SwapController({
@@ -461,7 +462,7 @@ export default class BlankController extends EventEmitter {
             this.blankDepositController.initialize();
         }
 
-        this.blockUpdatesController.setBlockUpdatesStatus(
+        this.blockUpdatesController.setActiveSubscriptions(
             isAppUnlocked,
             activeSubscriptions
         );
@@ -877,6 +878,8 @@ export default class BlankController extends EventEmitter {
                 return this.setUserSettings(request as RequestUserSettings);
             case Messages.WALLET.DISMISS_WELCOME_MESSAGE:
                 return this.dismissWelcomeMessage();
+            case Messages.WALLET.DISMISS_RELEASE_NOTES:
+                return this.dismissReleaseNotes();
             default:
                 throw new Error(`Unable to handle message of type ${type}`);
         }
@@ -1202,7 +1205,7 @@ export default class BlankController extends EventEmitter {
      *
      * @param id - id of the transaction being confirmed.
      * @param feeData - fee data selected by the user. Will update transaction's data if needed.
-     * @param advancedData - advanced data that can be changed by the user to apply to the transaction. For now customNonce
+     * @param advancedData - advanced data that can be changed by the user to apply to the transaction.
      */
     private async confirmTransaction({
         id,
@@ -1227,11 +1230,16 @@ export default class BlankController extends EventEmitter {
                     meta.transactionParams.maxPriorityFeePerGas,
                 maxFeePerGas:
                     feeData.maxFeePerGas || meta.transactionParams.maxFeePerGas,
-
                 nonce:
                     advancedData?.customNonce || meta.transactionParams.nonce, // custom nonce update
             },
             flashbots: advancedData?.flashbots || meta.flashbots, // flashbots update
+            advancedData: {
+                ...meta.advancedData,
+                allowance:
+                    advancedData.customAllowance ||
+                    meta.advancedData?.allowance,
+            },
         });
 
         return this.transactionController.approveTransaction(id);
@@ -1902,6 +1910,10 @@ export default class BlankController extends EventEmitter {
         //Show the welcome to the wallet message
         this.preferencesController.setShowWelcomeMessage(true);
 
+        // Get manifest version and init the release notes settings
+        const appVersion = await getVersion();
+        this.preferencesController.initReleaseNotesSettings(appVersion);
+
         // Set account tracker
         this.accountTrackerController.addPrimaryAccount(account);
 
@@ -1932,15 +1944,21 @@ export default class BlankController extends EventEmitter {
         // Clear all tokens
         this.tokenController.clearTokens();
 
+        // BIP44 seed phrase are always lowercase
+        seedPhrase = seedPhrase.toLowerCase();
+
         // Create new vault
         await this.keyringController.createNewVaultAndRestore(
             password,
             seedPhrase
         );
 
-        // Initialize deposit vault
         if (!reImport) {
+            // Initialize deposit vault
             await this.blankDepositController.initializeVault(password);
+
+            //Show the welcome to the wallet message
+            this.preferencesController.setShowWelcomeMessage(true);
         } else {
             await this.blankDepositController.reinitializeVault(password);
         }
@@ -1956,6 +1974,10 @@ export default class BlankController extends EventEmitter {
 
         //Show the welcome to the wallet message
         this.preferencesController.setShowWelcomeMessage(true);
+
+        // Get manifest version and init the release notes settings
+        const appVersion = await getVersion();
+        this.preferencesController.initReleaseNotesSettings(appVersion);
 
         // Set account tracker
         this.accountTrackerController.addPrimaryAccount(account);
@@ -1981,6 +2003,8 @@ export default class BlankController extends EventEmitter {
         password,
         seedPhrase,
     }: RequestWalletReset): Promise<boolean> {
+        // if the user is in a network that does not support tornado the reset process fails
+        await this.networkController.setNetwork('MAINNET');
         return this.walletImport({ password, seedPhrase, reImport: true });
     }
 
@@ -2427,6 +2451,17 @@ export default class BlankController extends EventEmitter {
      */
     private async dismissWelcomeMessage(): Promise<boolean> {
         this.preferencesController.showWelcomeMessage = false;
+        return true;
+    }
+
+    /**
+     * Dismisses the release notes and sets the lastVersionUserSawNews variable
+     */
+    private async dismissReleaseNotes(): Promise<boolean> {
+        this.preferencesController.releaseNotesSettings = {
+            lastVersionUserSawNews: getVersion(),
+            latestReleaseNotes: [],
+        };
         return true;
     }
 

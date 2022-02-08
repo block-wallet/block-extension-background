@@ -16,21 +16,13 @@ import {
     TokenControllerProps,
 } from '../../src/controllers/erc-20/TokenController';
 import { PreferencesController } from '../../src/controllers/PreferencesController';
-import { TornadoServiceProps } from '../../src/controllers/blank-deposit/tornado/TornadoService';
 import { ITokens, Token } from '../../src/controllers/erc-20/Token';
 import { TokenOperationsController } from '@blank/background/controllers/erc-20/transactions/Transaction';
-import { mockedPermissionsController } from '../mocks/mock-permissions';
-import PermissionsController from '@blank/background/controllers/PermissionsController';
-import { GasPricesController } from '@blank/background/controllers/GasPricesController';
 import initialState from '@blank/background/utils/constants/initialState';
-import { TypedTransaction } from '@ethereumjs/tx';
 import { getNetworkControllerInstance } from '../mocks/mock-network-instance';
-import BlockUpdatesController from '@blank/background/controllers/BlockUpdatesController';
-import { ExchangeRatesController } from '@blank/background/controllers/ExchangeRatesController';
-import { IncomingTransactionController } from '@blank/background/controllers/IncomingTransactionController';
-import TransactionController from '@blank/background/controllers/transactions/TransactionController';
+import BlockUpdatesController from '@blank/background/controllers/block-updates/BlockUpdatesController';
 import KeyringControllerDerivated from '@blank/background/controllers/KeyringControllerDerivated';
-import BlockFetchController from '@blank/background/controllers/BlockFetchController';
+import BlockFetchController from '@blank/background/controllers/block-updates/BlockFetchController';
 
 describe('AccountTracker controller implementation', function () {
     const accounts = {
@@ -46,50 +38,25 @@ describe('AccountTracker controller implementation', function () {
         ],
     };
     let tokenController: TokenController;
-    let transactionController: TransactionController;
     let preferencesController: PreferencesController;
-    let tornadoServiceProps: TornadoServiceProps;
     let accountTrackerController: AccountTrackerController;
     let networkController: NetworkController;
-    let keyringController: KeyringControllerDerivated;
     let tokenOperationsController: TokenOperationsController;
-    let permissionsController: PermissionsController;
-    let gasPricesController: GasPricesController;
-    let blockFetchController: BlockFetchController;
     let blockUpdatesController: BlockUpdatesController;
-    let exchangeRatesController: ExchangeRatesController;
-    let incomingTransactionController: IncomingTransactionController;
 
     beforeEach(() => {
         // Instantiate objects
         networkController = getNetworkControllerInstance();
+
+        blockUpdatesController = new BlockUpdatesController(
+            networkController,
+            new BlockFetchController(networkController, {
+                blockFetchData: {},
+            }),
+            { blockData: {} }
+        );
+
         preferencesController = mockPreferencesController;
-        permissionsController = mockedPermissionsController;
-        gasPricesController = new GasPricesController(
-            initialState.GasPricesController,
-            networkController
-        );
-
-        transactionController = new TransactionController(
-            networkController,
-            preferencesController,
-            permissionsController,
-            gasPricesController,
-            {
-                transactions: [],
-            },
-            async (ethTx: TypedTransaction) => {
-                const privateKey = Buffer.from(accounts.goerli[0].key, 'hex');
-                return Promise.resolve(ethTx.sign(privateKey));
-            },
-            { txHistoryLimit: 40 }
-        );
-
-        tornadoServiceProps = {
-            preferencesController,
-            transactionController,
-            networkController,
-        } as TornadoServiceProps;
 
         tokenOperationsController = new TokenOperationsController({
             networkController: networkController,
@@ -107,52 +74,13 @@ describe('AccountTracker controller implementation', function () {
             } as TokenControllerProps
         );
 
-        keyringController = new KeyringControllerDerivated({});
-
         accountTrackerController = new AccountTrackerController(
-            keyringController,
+            new KeyringControllerDerivated({}),
             networkController,
             tokenController,
             tokenOperationsController,
-            preferencesController
-        );
-
-        exchangeRatesController = new ExchangeRatesController(
-            {
-                exchangeRates: { ETH: 2786.23, USDT: 1 },
-                networkNativeCurrency: {
-                    symbol: 'ETH',
-                    // Default Coingecko id for ETH rates
-                    coingeckoPlatformId: 'ethereum',
-                },
-            },
             preferencesController,
-            networkController,
-            () => {
-                return {};
-            }
-        );
-
-        incomingTransactionController = new IncomingTransactionController(
-            networkController,
-            preferencesController,
-            accountTrackerController,
-            { incomingTransactions: {} }
-        );
-
-        blockFetchController = new BlockFetchController(networkController, {
-            blockFetchData: {},
-        });
-
-        blockUpdatesController = new BlockUpdatesController(
-            networkController,
-            accountTrackerController,
-            gasPricesController,
-            exchangeRatesController,
-            incomingTransactionController,
-            transactionController,
-            blockFetchController,
-            { blockData: {} }
+            blockUpdatesController
         );
     });
 

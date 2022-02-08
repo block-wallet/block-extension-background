@@ -2,8 +2,6 @@ import { expect } from 'chai';
 import { BigNumber, providers } from 'ethers';
 import sinon from 'sinon';
 import { TypedTransaction } from '@ethereumjs/tx';
-import { TokenController } from '@blank/background/controllers/erc-20/TokenController';
-import { TokenOperationsController } from '@blank/background/controllers/erc-20/transactions/Transaction';
 import {
     GasPriceData,
     GasPricesController,
@@ -27,6 +25,10 @@ import {
 } from '@blank/background/controllers/transactions/utils/types';
 import { ProviderError } from '@blank/background/utils/types/ethereum';
 import { FeeData } from '@ethersproject/abstract-provider';
+import BlockUpdatesController from '@blank/background/controllers/block-updates/BlockUpdatesController';
+import BlockFetchController from '@blank/background/controllers/block-updates/BlockFetchController';
+import { TokenController } from '@blank/background/controllers/erc-20/TokenController';
+import { TokenOperationsController } from '@blank/background/controllers/erc-20/transactions/Transaction';
 
 // TODO: Test gas override
 
@@ -56,8 +58,9 @@ describe('Transactions Controller', () => {
     let preferencesController: PreferencesController;
     let permissionsController: PermissionsController;
     let gasPricesController: GasPricesController;
+    let blockUpdatesController: BlockUpdatesController;
+    let blockFetchController: BlockFetchController;
     let tokenController: TokenController;
-    let tokenOperationsController: TokenOperationsController;
     const mockedAccounts = {
         goerli: [
             {
@@ -76,14 +79,39 @@ describe('Transactions Controller', () => {
             // Instantiate objects
             networkController = getNetworkControllerInstance();
 
+            blockFetchController = new BlockFetchController(networkController, {
+                blockFetchData: {},
+            });
+
+            blockUpdatesController = new BlockUpdatesController(
+                networkController,
+                blockFetchController,
+                { blockData: {} }
+            );
+
             preferencesController = mockPreferencesController;
             preferencesController.setSelectedAddress(
                 mockedAccounts['goerli'][0].address
             );
 
             gasPricesController = new GasPricesController(
-                initialState.GasPricesController,
-                networkController
+                networkController,
+                blockUpdatesController,
+                initialState.GasPricesController
+            );
+
+            tokenController = new TokenController(
+                {
+                    userTokens: {} as any,
+                    deletedUserTokens: {} as any,
+                },
+                {
+                    networkController,
+                    preferencesController: preferencesController,
+                    tokenOperationsController: new TokenOperationsController({
+                        networkController: networkController,
+                    }),
+                }
             );
 
             transactionController = new TransactionController(
@@ -91,6 +119,8 @@ describe('Transactions Controller', () => {
                 preferencesController,
                 mockedPermissionsController,
                 gasPricesController,
+                tokenController,
+                blockUpdatesController,
                 {
                     transactions: [],
                 },
@@ -340,6 +370,19 @@ describe('Transactions Controller', () => {
 
         beforeEach(() => {
             networkController = getNetworkControllerInstance();
+
+            blockFetchController = new BlockFetchController(networkController, {
+                blockFetchData: {},
+            });
+            sinon
+                .stub(blockFetchController, 'removeAllOnBlockListener')
+                .returns();
+            blockUpdatesController = new BlockUpdatesController(
+                networkController,
+                blockFetchController,
+                { blockData: {} }
+            );
+
             mockedProvider = sinon
                 .stub(networkController, 'getProvider')
                 .returns(providerMock);
@@ -358,8 +401,9 @@ describe('Transactions Controller', () => {
             );
 
             gasPricesController = new GasPricesController(
-                initialState.GasPricesController,
-                networkController
+                networkController,
+                blockUpdatesController,
+                initialState.GasPricesController
             );
 
             sinon.stub(gasPricesController, 'getFeeData').returns({
@@ -378,10 +422,6 @@ describe('Transactions Controller', () => {
                 }),
             }));
 
-            tokenOperationsController = new TokenOperationsController({
-                networkController: networkController,
-            });
-
             tokenController = new TokenController(
                 {
                     userTokens: {} as any,
@@ -390,7 +430,9 @@ describe('Transactions Controller', () => {
                 {
                     networkController,
                     preferencesController: preferencesController,
-                    tokenOperationsController,
+                    tokenOperationsController: new TokenOperationsController({
+                        networkController: networkController,
+                    }),
                 }
             );
 
@@ -399,6 +441,8 @@ describe('Transactions Controller', () => {
                 preferencesController,
                 permissionsController,
                 gasPricesController,
+                tokenController,
+                blockUpdatesController,
                 {
                     transactions: [],
                 },
@@ -837,31 +881,14 @@ describe('Transactions Controller', () => {
                 time: 1,
                 blocksDropCount: 1,
                 transactionParams: {
-                    to: mockedAccounts.goerli[0].address,
-                    data: '0xa9059cbb000000000000000000000000e7327602980619ebe59e90becfb868d48603c4f500000000000000000000000000000000000000000000006194049f30f7200000',
+                    to: '',
+                    data: '0x64b07f210000000000000000000000000000000000000000000000000000000000000001',
                 },
                 metaType: MetaType.REGULAR,
                 loadingGasValues: false,
             };
 
             let transactionCategory;
-
-            transactionCategory = transactionController.checkPresetCategories(
-                transactionMeta.transactionParams.data!
-            );
-
-            expect(transactionCategory).to.be.equal(
-                TransactionCategories.TOKEN_METHOD_TRANSFER
-            );
-
-            transactionMeta = {
-                ...transactionMeta,
-                transactionParams: {
-                    ...transactionMeta.transactionParams,
-                    to: '',
-                    data: '0x64b07f210000000000000000000000000000000000000000000000000000000000000001',
-                },
-            };
 
             transactionCategory =
                 await transactionController.determineTransactionCategory(
@@ -1587,14 +1614,37 @@ describe('Transactions Controller', () => {
             // Instantiate objects
             networkController = getNetworkControllerInstance();
 
+            blockUpdatesController = new BlockUpdatesController(
+                networkController,
+                new BlockFetchController(networkController, {
+                    blockFetchData: {},
+                }),
+                { blockData: {} }
+            );
+
             preferencesController = mockPreferencesController;
             preferencesController.setSelectedAddress(
                 mockedAccounts['goerli'][0].address
             );
 
             gasPricesController = new GasPricesController(
-                initialState.GasPricesController,
-                networkController
+                networkController,
+                blockUpdatesController,
+                initialState.GasPricesController
+            );
+
+            tokenController = new TokenController(
+                {
+                    userTokens: {} as any,
+                    deletedUserTokens: {} as any,
+                },
+                {
+                    networkController,
+                    preferencesController: preferencesController,
+                    tokenOperationsController: new TokenOperationsController({
+                        networkController: networkController,
+                    }),
+                }
             );
 
             transactionController = new TransactionController(
@@ -1602,6 +1652,8 @@ describe('Transactions Controller', () => {
                 preferencesController,
                 mockedPermissionsController,
                 gasPricesController,
+                tokenController,
+                blockUpdatesController,
                 {
                     transactions: [],
                 },

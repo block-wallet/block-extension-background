@@ -7,11 +7,17 @@ import {
     TransactionStatus,
 } from './transactions/utils/types';
 import NetworkController, { NetworkEvents } from './NetworkController';
-import { AccountTrackerController } from './AccountTrackerController';
 import { BigNumber } from 'ethers';
 import { PreferencesController } from './PreferencesController';
-import { Network } from '../utils/constants/networks';
+import {
+    ACTIONS_TIME_INTERVALS_DEFAULT_VALUES,
+    Network,
+} from '../utils/constants/networks';
 import { showIncomingTransactionNotification } from '../utils/notifications';
+import BlockUpdatesController, {
+    BlockUpdatesEvents,
+} from './block-updates/BlockUpdatesController';
+import { ActionIntervalController } from './block-updates/ActionIntervalController';
 
 export interface IncomingTransactionControllerState {
     incomingTransactions: {
@@ -39,25 +45,46 @@ interface EtherscanTransaction {
 }
 
 export class IncomingTransactionController extends BaseController<IncomingTransactionControllerState> {
+    private readonly _incomingTransactionsUpdateIntervalController: ActionIntervalController;
     private _chainId?: number;
     private _networkName?: string;
 
     constructor(
         private readonly _networkController: NetworkController,
         private readonly _preferencesController: PreferencesController,
-        _accountTrackerController: AccountTrackerController,
+        private readonly _blockUpdatesController: BlockUpdatesController,
         initialState: IncomingTransactionControllerState
     ) {
         super(initialState);
 
+        this._incomingTransactionsUpdateIntervalController =
+            new ActionIntervalController(this._networkController);
         this._chainId = _networkController.network.chainId;
         this._networkName = _networkController.network.name;
 
-        _networkController.on(
+        this._networkController.on(
             NetworkEvents.NETWORK_CHANGE,
             ({ chainId, name }: Network) => {
                 this._chainId = chainId;
                 this._networkName = name;
+                this.updateIncomingTransactions();
+            }
+        );
+
+        this._blockUpdatesController.on(
+            BlockUpdatesEvents.BLOCK_UPDATES_SUBSCRIPTION,
+            async (chainId: number) => {
+                const network =
+                    this._networkController.getNetworkFromChainId(chainId);
+                const interval =
+                    network?.actionsTimeIntervals.incomingTransactionsUpdate ||
+                    ACTIONS_TIME_INTERVALS_DEFAULT_VALUES.incomingTransactionsUpdate;
+                this._incomingTransactionsUpdateIntervalController.tick(
+                    interval,
+                    async () => {
+                        await this.updateIncomingTransactions();
+                    }
+                );
             }
         );
 

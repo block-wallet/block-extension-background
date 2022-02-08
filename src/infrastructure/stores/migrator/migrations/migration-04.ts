@@ -1,6 +1,5 @@
 import { BlankAppState } from '@blank/background/utils/constants/initialState';
 import { IMigration } from '../IMigration';
-import { Network } from '../../../../utils/constants/networks';
 
 /**
  * This migration adds the websocket rpc endpoints to the current networks
@@ -11,7 +10,7 @@ export default {
         const updatedNetworks = { ...availableNetworks };
 
         const networkAssetsAutoDiscoveryInterfal: {
-            [x: string]: Network['assetsAutoDiscoveryInterval'];
+            [x: string]: number;
         } = {
             MAINNET: 10,
             ARBITRUM: 15,
@@ -32,7 +31,7 @@ export default {
                     ...updatedNetworks[network],
                     assetsAutoDiscoveryInterval:
                         networkAssetsAutoDiscoveryInterfal[network],
-                };
+                } as any;
             }
         }
 

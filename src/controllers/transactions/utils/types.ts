@@ -144,6 +144,6 @@ export enum TransactionType {
  * Transaction params that can be setted by the user using the Advance Settings popup.
  */
 export interface TransactionAdvancedData {
-    customNonce?: number
-    flashbots?: boolean
+    customNonce?: number;
+    flashbots?: boolean;
 }

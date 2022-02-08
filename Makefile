@@ -22,3 +22,12 @@ build/background:
 
 depcheck:
 	@npx depcheck
+
+version/patch: 
+	@yarn version --patch
+
+version/minor: 
+	@yarn version --minor
+
+version/major:
+	@yarn version --major

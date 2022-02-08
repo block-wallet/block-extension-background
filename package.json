@@ -1,9 +1,9 @@
 {
     "name": "@blank/background",
-    "version": "0.1.12",
+    "version": "0.1.18",
     "private": true,
     "dependencies": {
-        "@blank/explorer-link": "https://github.com/Blank-Wallet/explorer-link",
+        "@blank/explorer-link": "https://github.com/Block-Wallet/explorer-link",
         "@eth-optimism/tokenlist": "https://github.com/ethereum-optimism/ethereum-optimism.github.io",
         "@ethereumjs/tx": "^3.2.1",
         "assets": "https://github.com/trustwallet/assets",
@@ -24,8 +24,8 @@
         "idb": "^6.0.0",
         "lodash": "^4.17.21",
         "loglevel": "^1.7.1",
-        "schema-validator": "git+https://github.com/Blank-Wallet/schema-validator.git",
-        "snarkjs": "git+https://github.com/Blank-Wallet/snarkjs.git#4b9003c21f480149c2f21c14156efe6b6cafd8e0",
+        "schema-validator": "git+https://github.com/Block-Wallet/schema-validator.git",
+        "snarkjs": "git+https://github.com/Block-Wallet/snarkjs.git#4b9003c21f480149c2f21c14156efe6b6cafd8e0",
         "uuid": "^8.3.2",
         "websnark": "git+https://github.com/tornadocash/websnark.git#4c0af6a8b65aabea3c09f377f63c44e7a58afa6d"
     },
@@ -52,7 +52,7 @@
         "fake-indexeddb": "^3.1.2",
         "fs-extra": "^9.0.1",
         "isomorphic-fetch": "^3.0.0",
-        "jsdom": "16.4.0",
+        "jsdom": "^19.0.0",
         "jsdom-global": "3.0.2",
         "loader-utils": "^2.0.0",
         "mocha": "^8.2.1",
@@ -77,9 +77,11 @@
         "webpack/**/set-value": "^4.0.1",
         "circomlib/**/yargs-parser": "^18.1.2",
         "circomlib/**/ws": "^5.2.3",
+        "circomlib/**/jsprim": "^1.4.2",
         "snarkjs/**/yargs-parser": "^18.1.2",
         "fixed-merkle-tree/**/yargs-parser": "^18.1.2",
-        "fixed-merkle-tree/**/ws": "^5.2.3"
+        "fixed-merkle-tree/**/ws": "^5.2.3",
+        "fixed-merkle-tree/**/jsprim": "^1.4.2"
     },
     "scripts": {
         "test": "make test/background",

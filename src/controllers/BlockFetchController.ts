@@ -8,7 +8,7 @@ const CHAIN_BLOCK_UPDATES_INTERVAL = 15000;
 export const BLOCKS_TO_WAIT_BEFORE_CHECHKING_FOR_CHAIN_SUPPORT = 100;
 
 const OFF_CHAIN_BLOCK_UPDATES_INTERVAL = 5000;
-const OFF_CHAIN_BLOCK_FETCH_SERVICE_URL = 'https://chain-fee.goblank.io/v1';
+const OFF_CHAIN_BLOCK_FETCH_SERVICE_URL = 'https://chain-fee.blockwallet.io/v1';
 const OFF_CHAIN_BLOCK_FETCH_SERVICE_MAX_REPEATED_BLOCKS_TOLERANCE = 100;
 
 export interface BlockFetchData {

@@ -8,7 +8,13 @@ import {
 } from '@ethersproject/providers';
 import { Interface } from '@ethersproject/abi';
 import log from 'loglevel';
-import { addHexPrefix, bnToHex, bufferToHex, isValidAddress, toChecksumAddress } from 'ethereumjs-util';
+import {
+    addHexPrefix,
+    bnToHex,
+    bufferToHex,
+    isValidAddress,
+    toChecksumAddress,
+} from 'ethereumjs-util';
 import { TransactionFactory, TypedTransaction } from '@ethereumjs/tx';
 import { v4 as uuid } from 'uuid';
 import { Mutex } from 'async-mutex';
@@ -170,7 +176,7 @@ export const SPEED_UP_RATE = {
 };
 
 /**
- * The result of determine the transaction category
+ * The result of determineTransactionCategory
  */
 interface TransactionCategoryResponse {
     transactionCategory: TransactionCategories;
@@ -219,8 +225,8 @@ export class TransactionController extends BaseController<
         public config: {
             txHistoryLimit: number;
         } = {
-                txHistoryLimit: 40,
-            }
+            txHistoryLimit: 40,
+        }
     ) {
         super(initialState);
 
@@ -380,7 +386,8 @@ export class TransactionController extends BaseController<
     public async addTransaction(
         transaction: TransactionParams,
         origin: string,
-        waitForConfirmation = false
+        waitForConfirmation = false,
+        customCategory?: TransactionCategories
     ): Promise<Result> {
         const { chainId } = this._networkController.network;
         const transactions = [...this.store.getState().transactions];
@@ -419,9 +426,13 @@ export class TransactionController extends BaseController<
             }
         }
 
-        // Determine transaction category and method signature
-        const { transactionCategory, methodSignature } =
-            await this.determineTransactionCategory(transaction);
+        let transactionCategory: TransactionCategories | undefined;
+
+        if (customCategory) {
+            transactionCategory = customCategory;
+        } else if (transaction.data) {
+            transactionCategory = this.checkPresetCategories(transaction.data);
+        }
 
         let transactionMeta: TransactionMeta = {
             id: uuid(),
@@ -429,14 +440,23 @@ export class TransactionController extends BaseController<
             origin,
             status: TransactionStatus.UNAPPROVED,
             time: Date.now(),
-            transactionCategory: transactionCategory,
-            methodSignature: methodSignature,
             transactionParams: transaction,
+            transactionCategory: transactionCategory,
             verifiedOnBlockchain: false,
             loadingGasValues: true,
             blocksDropCount: 0,
             metaType: MetaType.REGULAR,
         };
+
+        let categoryAndMethodSignature: Promise<
+            TransactionCategoryResponse | undefined
+        >;
+
+        if (!transactionCategory) {
+            // determine transaction category of the tx asynchronously
+            categoryAndMethodSignature =
+                this.determineTransactionCategory(transactionMeta);
+        }
 
         try {
             // Estimate gas
@@ -468,6 +488,23 @@ export class TransactionController extends BaseController<
         this.store.updateState({
             transactions: this.trimTransactionsForState(transactions),
         });
+
+        // if transaction category was determined in time, update the transaction
+        if (!transactionCategory) {
+            categoryAndMethodSignature!.then((transactionCategoryResponse) => {
+                const txMeta = this.getTransaction(transactionMeta.id);
+
+                const newTxMeta = {
+                    ...txMeta!,
+                    transactionCategory:
+                        transactionCategoryResponse?.transactionCategory,
+                    methodSignature:
+                        transactionCategoryResponse?.methodSignature,
+                };
+
+                this.updateTransaction(newTxMeta);
+            });
+        }
 
         return { result, transactionMeta };
     }
@@ -535,7 +572,8 @@ export class TransactionController extends BaseController<
     ): Promise<string> {
         return new Promise((resolve, reject) => {
             this.hub.once(
-                `${transactionMetaId}:${!waitForConfirmation ? 'finished' : 'confirmed'
+                `${transactionMetaId}:${
+                    !waitForConfirmation ? 'finished' : 'confirmed'
                 }`,
                 (meta: TransactionMeta) => {
                     switch (meta.status) {
@@ -651,13 +689,13 @@ export class TransactionController extends BaseController<
 
             const txParams = isEIP1559
                 ? {
-                    ...baseTxParams,
-                    maxFeePerGas:
-                        transactionMeta.transactionParams.maxFeePerGas,
-                    maxPriorityFeePerGas:
-                        transactionMeta.transactionParams
-                            .maxPriorityFeePerGas,
-                }
+                      ...baseTxParams,
+                      maxFeePerGas:
+                          transactionMeta.transactionParams.maxFeePerGas,
+                      maxPriorityFeePerGas:
+                          transactionMeta.transactionParams
+                              .maxPriorityFeePerGas,
+                  }
                 : baseTxParams;
 
             // delete gasPrice if maxFeePerGas and maxPriorityFeePerGas are set
@@ -1283,7 +1321,7 @@ export class TransactionController extends BaseController<
         return !!transactions.find(
             (t) =>
                 t.transactionParams.nonce ===
-                transaction.transactionParams.nonce &&
+                    transaction.transactionParams.nonce &&
                 compareAddresses(
                     t.transactionParams.from,
                     transaction.transactionParams.from
@@ -1410,6 +1448,17 @@ export class TransactionController extends BaseController<
                     return [meta, false];
                 }
 
+                // We check again that we are not in the case that the new nonce is from the current transaction
+                // due to a race condition in which the tx gets confirmed right at the same moment that the buffer count
+                // reaches the BLOCK_UPDATES_BEFORE_DROP amount.
+                const reCheckTx = await provider.getTransaction(
+                    transactionHash!
+                );
+                if (reCheckTx) {
+                    return [meta, false];
+                }
+
+                // Check for transaction drop or replacement
                 if (meta.blocksDropCount < BLOCK_UPDATES_BEFORE_DROP) {
                     meta.blocksDropCount += 1;
                     return [meta, false];
@@ -1615,39 +1664,16 @@ export class TransactionController extends BaseController<
 
         const { blockGasLimit } = this._gasPricesController.getState();
 
-        // 2. If to is not defined or this is not a contract address, and there is no data (i.e. the transaction is of type SENT_ETHER) use SEND_GAS_COST (0x5208 or 21000).
-        // If the network is a custom network then bypass this check and fetch 'estimateGas'.
-
-        if (typeof transactionMeta.transactionCategory === 'undefined') {
-            // If estimateGas was called with no transaction category, determine it
-            const { transactionCategory } =
-                await this.determineTransactionCategory(
-                    transactionMeta.transactionParams
-                );
-            transactionMeta.transactionCategory = transactionCategory;
-        }
-
         // Check if it's a custom chainId
         const txOrCurrentChainId =
             transactionMeta.chainId ?? this._networkController.network.chainId;
         const isCustomNetwork =
             this._networkController.isChainIdCustomNetwork(txOrCurrentChainId);
 
-        if (
-            !isCustomNetwork &&
-            transactionMeta.transactionCategory ===
-            TransactionCategories.SENT_ETHER
-        ) {
-            return {
-                gasLimit: BigNumber.from(SEND_GAS_COST),
-                estimationSucceeded: true,
-            };
-        }
-
         // if data, should be hex string format
         estimatedTransaction.data = !data ? data : addHexPrefix(data);
 
-        // 3. If this is a contract address, safely estimate gas using RPC
+        // 2. If this is a contract address, safely estimate gas using RPC
         estimatedTransaction.value =
             typeof value === 'undefined' ? constants.Zero : value;
 
@@ -1669,7 +1695,7 @@ export class TransactionController extends BaseController<
                 to: estimatedTransaction.to,
                 value: estimatedTransaction.value,
             });
-            // 4. Pad estimated gas without exceeding the most recent block gasLimit. If the network is a
+            // 3. Pad estimated gas without exceeding the most recent block gasLimit. If the network is a
             // a custom network then return the eth_estimateGas value.
 
             // 90% of the block gasLimit
@@ -1681,6 +1707,14 @@ export class TransactionController extends BaseController<
                 3,
                 2
             );
+
+            // If it is a non-custom network, don't add buffer to send gas limit
+            if (estimatedGasLimit.eq(SEND_GAS_COST) && !isCustomNetwork) {
+                return {
+                    gasLimit: estimatedGasLimit,
+                    estimationSucceeded: true,
+                };
+            }
 
             // If estimatedGasLimit is above upperGasLimit, dont modify it
             if (estimatedGasLimit.gt(upperGasLimit) || isCustomNetwork) {
@@ -1724,25 +1758,24 @@ export class TransactionController extends BaseController<
             .transactions.filter(
                 (t) =>
                     t.transactionCategory ===
-                    TransactionCategories.BLANK_DEPOSIT &&
+                        TransactionCategories.BLANK_DEPOSIT &&
                     t.status !== TransactionStatus.UNAPPROVED &&
                     t.chainId === fromChainId
             );
     };
 
     /**
-     * determineTransactionCategory
+     * checkPresetCategories
      *
-     * It determines the transaction category
+     * Checks if the passed data corresponds to one of the preset categories
      *
-     * @param {TransactionParams} transactionParams The transaction object
-     * @returns {Promise<TransactionCategoryResponse>} The transaction category and method signature
+     * @returns The preset category if it exists, otherwise undefined
      */
-    public async determineTransactionCategory(
-        transactionParams: TransactionParams
-    ): Promise<TransactionCategoryResponse> {
-        const { data, to } = transactionParams;
+    public checkPresetCategories(
+        data: string
+    ): TransactionCategories | undefined {
         let name: string | undefined;
+
         try {
             name = data && this._erc20Abi.parseTransaction({ data }).name;
         } catch (error) {
@@ -1755,17 +1788,47 @@ export class TransactionController extends BaseController<
             TransactionCategories.TOKEN_METHOD_TRANSFER_FROM,
         ].find((methodName) => methodName === name && name.toLowerCase());
 
-        let result;
-        if (data && tokenMethodName) {
-            result = tokenMethodName;
-        } else if (data && !to) {
-            result = TransactionCategories.CONTRACT_DEPLOYMENT;
+        return tokenMethodName;
+    }
+
+    /**
+     * determineTransactionCategory
+     *
+     * It determines the transaction category
+     *
+     * @param transactionMeta The transaction object
+     * @returns {TransactionCategories} The transaction category and method signature
+     */
+    public async determineTransactionCategory(
+        transactionMeta: TransactionMeta
+    ): Promise<TransactionCategoryResponse | undefined> {
+        const { data, to } = transactionMeta.transactionParams;
+        let methodSignature: ContractMethodSignature | undefined;
+
+        if (transactionMeta.transactionCategory) {
+            if (
+                transactionMeta.transactionCategory ===
+                    TransactionCategories.CONTRACT_INTERACTION &&
+                data
+            ) {
+                methodSignature = await this.getMethodSignature(data);
+            }
+
+            return {
+                transactionCategory: transactionMeta.transactionCategory,
+                methodSignature,
+            };
+        }
+
+        let transactionCategory;
+
+        if (data && !to) {
+            transactionCategory = TransactionCategories.CONTRACT_DEPLOYMENT;
         }
 
         let code;
-        let methodSignature: ContractMethodSignature | undefined = undefined;
 
-        if (!result) {
+        if (!transactionCategory) {
             try {
                 code = await this._networkController.getProvider().getCode(to!);
             } catch (e) {
@@ -1775,33 +1838,53 @@ export class TransactionController extends BaseController<
 
             const codeIsEmpty = !code || code === '0x' || code === '0x0';
 
-            result = codeIsEmpty
+            transactionCategory = codeIsEmpty
                 ? TransactionCategories.SENT_ETHER
                 : TransactionCategories.CONTRACT_INTERACTION;
 
-            // If contract interaction, try to fetch the method signature
-            if (result === TransactionCategories.CONTRACT_INTERACTION) {
-                try {
-                    // Obtain first 4 bytes from transaction data
-                    const bytesSignature = data!.slice(0, 10);
-
-                    // Lookup on signature registry contract
-                    const unparsedSignature =
-                        await this._signatureRegistry.lookup(bytesSignature);
-
-                    // If there was a response, parse the signature
-                    methodSignature = unparsedSignature
-                        ? this._signatureRegistry.parse(unparsedSignature)
-                        : undefined;
-                } catch (error) {
-                    log.warn(error);
-                }
+            if (
+                transactionCategory ===
+                    TransactionCategories.CONTRACT_INTERACTION &&
+                data
+            ) {
+                methodSignature = await this.getMethodSignature(data);
             }
         }
 
-        return { transactionCategory: result, methodSignature };
+        return { transactionCategory, methodSignature };
     }
 
+    /**
+     * get readable transaction method
+     *
+     * @param data the transaction data
+     * @param id the transaction id
+     * @returns The method signature or undefined
+     */
+    public async getMethodSignature(
+        data: string
+    ): Promise<ContractMethodSignature | undefined> {
+        let methodSignature;
+
+        try {
+            // Obtain first 4 bytes from transaction data
+            const bytesSignature = data!.slice(0, 10);
+
+            // Lookup on signature registry contract
+            const unparsedSignature = await this._signatureRegistry.lookup(
+                bytesSignature
+            );
+
+            // If there was a response, parse the signature
+            methodSignature = unparsedSignature
+                ? this._signatureRegistry.parse(unparsedSignature)
+                : undefined;
+        } catch (error) {
+            log.warn(error);
+        }
+
+        return methodSignature;
+    }
 
     /**
      * Returns the next nonce without locking to be displayed as reference on advanced settings modal.

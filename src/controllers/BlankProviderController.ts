@@ -19,7 +19,9 @@ import {
     DappRequestConfirmOptions,
     WatchAssetConfirmParams,
     SubscriptionParams,
-    SubcriptionResult,
+    SubscriptionType,
+    Subscription,
+    Block,
 } from '../utils/types/ethereum';
 import { v4 as uuid } from 'uuid';
 import { BaseController } from '../infrastructure/BaseController';
@@ -65,13 +67,22 @@ import { Token } from './erc-20/Token';
 import { validateChainId } from '../utils/ethereumChain';
 import log from 'loglevel';
 import KeyringControllerDerivated from './KeyringControllerDerivated';
+import { randomBytes } from '../utils/randomBytes';
+import BlockUpdatesController, {
+    BlockUpdatesEvents,
+} from './BlockUpdatesController';
+import { Filter } from '@ethersproject/abstract-provider';
+import {
+    parseBlock,
+    validateLogSubscriptionRequest,
+} from '../utils/subscriptions';
 
 export enum BlankProviderEvents {
     SUBSCRIPTION_UPDATE = 'SUBSCRIPTION_UPDATE',
 }
 
 interface ActiveSubscriptions {
-    [id: string]: { id: string; portId: string };
+    [id: string]: Subscription;
 }
 
 export interface BlankProviderControllerState {
@@ -93,7 +104,8 @@ export default class BlankProviderController extends BaseController<BlankProvide
         private readonly _permissionsController: PermissionsController,
         private readonly _appStateController: AppStateController,
         private readonly _keyringController: KeyringControllerDerivated,
-        private readonly _tokenController: TokenController
+        private readonly _tokenController: TokenController,
+        private readonly _blockUpdatesController: BlockUpdatesController
     ) {
         super({ dappRequests: {} });
 
@@ -119,28 +131,11 @@ export default class BlankProviderController extends BaseController<BlankProvide
             }
         );
 
-        // Listen to web socket provider messages
-        this._networkController.on(
-            NetworkEvents.WS_PROVIDER_MESSAGE,
-            (result: SubcriptionResult) => {
-                if (result.method === 'eth_subscription') {
-                    const subId = result.params.subscription;
-
-                    // Get active sub
-                    const activeSubscription = this._activeSubscriptions[subId];
-
-                    if (activeSubscription) {
-                        this._handleSubscriptionResponse(
-                            activeSubscription.portId,
-                            subId,
-                            result.params.result
-                        );
-                    }
-                }
-            }
-        );
-
         // Set watchers
+        this._blockUpdatesController.on(
+            BlockUpdatesEvents.BLOCK_UPDATES_SUBSCRIPTION,
+            this.handleBlockUpdatesSubscriptions
+        );
 
         this._transactionController.UIStore.subscribe(
             this._stateWatcher.TRANSACTIONS
@@ -156,6 +151,28 @@ export default class BlankProviderController extends BaseController<BlankProvide
     }
 
     /**
+     * Callback method to handle subscriptions that
+     * is triggered every block update.
+     *
+     * @param chainId The current network chainId
+     * @param previousBlockNumber The previous update block number
+     * @param newBlockNumber The new update block number
+     */
+    public handleBlockUpdatesSubscriptions = (
+        chainId: number,
+        previousBlockNumber: number,
+        newBlockNumber: number
+    ): void => {
+        for (const subscriptionId in this._activeSubscriptions) {
+            this._activeSubscriptions[subscriptionId].notification(
+                chainId,
+                previousBlockNumber,
+                newBlockNumber
+            );
+        }
+    };
+
+    /**
      * Setup the provider id and saves the site metadata
      *
      * @returns provider setup data
@@ -169,9 +186,7 @@ export default class BlankProviderController extends BaseController<BlankProvide
         }
 
         const chainId = await this._getChainId();
-
         const networkVersion = await this._getNetworkVersion();
-
         const accounts = this._accountsRequest(providerInstances[portId]);
 
         return {
@@ -262,6 +277,8 @@ export default class BlankProviderController extends BaseController<BlankProvide
         }
 
         switch (method) {
+            case JSONRPCMethod.eth_blockNumber:
+                return this._blockUpdatesController.getBlockNumber();
             case JSONRPCMethod.eth_accounts:
                 return this._accountsRequest(instanceData, true);
             case JSONRPCMethod.eth_chainId:
@@ -411,55 +428,145 @@ export default class BlankProviderController extends BaseController<BlankProvide
         params: SubscriptionParams,
         portId: string
     ): Promise<string> => {
-        // Get web socket provider
-        const wsProvider = await this._networkController.getWebSocketProvider(
-            true
-        );
+        const subscriptionId = '0x' + randomBytes(16).toString('hex');
+        const subscriptionType = params[0];
+        let subscription = {
+            id: subscriptionId,
+            type: subscriptionType,
+            portId: portId,
+        } as Subscription;
 
-        if (!wsProvider) {
-            throw new Error(ProviderError.RESOURCE_UNAVAILABLE);
+        switch (subscriptionType) {
+            case SubscriptionType.newHeads:
+                subscription = {
+                    ...subscription,
+                    ...this._createNewHeadsSubscription(subscriptionId, portId),
+                };
+                break;
+            case SubscriptionType.logs:
+                subscription = {
+                    ...subscription,
+                    ...this._createLogsSubscription(
+                        subscriptionId,
+                        portId,
+                        params[1] as {
+                            address: string;
+                            topics: Array<string | Array<string> | null>;
+                        }
+                    ),
+                };
+                break;
+            default:
+                throw new Error(ProviderError.UNSUPPORTED_SUBSCRIPTION_TYPE);
         }
 
-        // Get subscription id
-        const subscriptionId = (await wsProvider.send(
-            JSONRPCMethod.eth_subscribe,
-            params
-        )) as string;
-
         // Add to active subscriptions
-        this._activeSubscriptions[subscriptionId] = {
-            id: subscriptionId,
-            portId,
-        };
+        this._activeSubscriptions[subscriptionId] = subscription;
 
         return subscriptionId;
+    };
+
+    /*
+
+    */
+    private _createNewHeadsSubscription = (
+        subscriptionId: string,
+        portId: string
+    ) => {
+        return {
+            notification: async (
+                chainId: number,
+                previousBlockNumber: number,
+                newBlockNumber: number
+            ) => {
+                for (
+                    let i = 1;
+                    i <= newBlockNumber - previousBlockNumber;
+                    i++
+                ) {
+                    if (chainId !== this._networkController.network.chainId) {
+                        return;
+                    }
+
+                    const block: Block = parseBlock(
+                        await this._networkController
+                            .getProvider()
+                            .send('eth_getBlockByNumber', [
+                                '0x' + (previousBlockNumber + i).toString(16),
+                                false,
+                            ])
+                    );
+
+                    if (subscriptionId in this._activeSubscriptions) {
+                        this._handleSubscriptionResponse(
+                            portId,
+                            subscriptionId,
+                            block as unknown as Record<string, unknown>
+                        );
+                    } else {
+                        return;
+                    }
+                }
+            },
+        } as Subscription;
+    };
+
+    private _createLogsSubscription = (
+        subscriptionId: string,
+        portId: string,
+        filterParams: {
+            address: string;
+            topics: Array<string | Array<string> | null>;
+        }
+    ) => {
+        validateLogSubscriptionRequest(filterParams);
+
+        return {
+            notification: async (
+                chainId: number,
+                previousBlockNumber: number,
+                newBlockNumber: number
+            ) => {
+                previousBlockNumber++;
+                if (chainId !== this._networkController.network.chainId) {
+                    return;
+                }
+
+                const filter: Filter = {
+                    fromBlock: previousBlockNumber,
+                    toBlock: newBlockNumber,
+                    ...filterParams,
+                };
+
+                const logs = await this._networkController
+                    .getProvider()
+                    .getLogs(filter);
+
+                for (let j = 0; j < logs.length; j++) {
+                    if (subscriptionId in this._activeSubscriptions) {
+                        this._handleSubscriptionResponse(
+                            portId,
+                            subscriptionId,
+                            logs[j] as unknown as Record<string, unknown>
+                        );
+                    } else {
+                        return;
+                    }
+                }
+            },
+        } as Subscription;
     };
 
     /**
      * Method to handle eth_unsubscribe
      */
-    private _handleUnsubscribe = async (
-        params: string[]
-    ): Promise<void | boolean> => {
+    private _handleUnsubscribe = async (params: string[]): Promise<boolean> => {
         const subscriptionId = params[0];
-        const wsProvider = await this._networkController.getWebSocketProvider();
 
         // Remove subscription handler
         delete this._activeSubscriptions[subscriptionId];
 
-        // Unsubscribe
-        if (wsProvider) {
-            const res: boolean = await wsProvider.send(
-                JSONRPCMethod.eth_unsubscribe,
-                params
-            );
-
-            if (isEmpty(this._activeSubscriptions)) {
-                this._networkController.terminateWebSocket();
-            }
-
-            return res;
-        }
+        return true;
     };
 
     //=============================================================================
@@ -632,7 +739,7 @@ export default class BlankProviderController extends BaseController<BlankProvide
         }
 
         // Submit request
-        const { isAccepted, reqId } = await this._submitDappRequest(
+        const { isAccepted, reqId, callback } = await this._submitDappRequest(
             DappReq.SWITCH_NETWORK,
             { chainId: normalizedChainId },
             instance.origin,
@@ -664,6 +771,9 @@ export default class BlankProviderController extends BaseController<BlankProvide
                 throw new Error(ProviderError.USER_REJECTED_REQUEST);
             }
         } finally {
+            // Resolve the handleDapRequest callback
+            callback.resolve();
+
             // Remove current request from list
             this.removeDappRequest(reqId);
         }
@@ -693,7 +803,7 @@ export default class BlankProviderController extends BaseController<BlankProvide
         }
 
         // Submit request
-        const { isAccepted, reqId } = await this._submitDappRequest(
+        const { isAccepted, reqId, callback } = await this._submitDappRequest(
             DappReq.SIGNING,
             { method, params: normalizedParams },
             instance.origin,
@@ -727,6 +837,9 @@ export default class BlankProviderController extends BaseController<BlankProvide
                 throw new Error(ProviderError.USER_REJECTED_REQUEST);
             }
         } finally {
+            // Resolve the handleDapRequest callback
+            callback.resolve();
+
             // Remove current request from list
             this.removeDappRequest(reqId);
         }
@@ -796,7 +909,7 @@ export default class BlankProviderController extends BaseController<BlankProvide
         }
 
         // Submit dapp request
-        const { isAccepted, reqId, confirmOptions } =
+        const { isAccepted, reqId, confirmOptions, callback } =
             await this._submitDappRequest(
                 DappReq.ASSET,
                 { params: validParams, activeAccount, isUpdate, savedToken },
@@ -829,6 +942,9 @@ export default class BlankProviderController extends BaseController<BlankProvide
                 throw new Error(ProviderError.USER_REJECTED_REQUEST);
             }
         } finally {
+            // Resolve the handleDapRequest callback
+            callback.resolve();
+
             // Remove current request from list
             this.removeDappRequest(reqId);
         }
@@ -851,6 +967,10 @@ export default class BlankProviderController extends BaseController<BlankProvide
         isAccepted: boolean;
         reqId: string;
         confirmOptions?: DappRequestConfirmOptions;
+        callback: {
+            resolve: (value: void | PromiseLike<void>) => void;
+            reject: (reason?: any) => void;
+        };
     }> => {
         return new Promise((resolve, reject): void => {
             // Get current requests
@@ -885,14 +1005,21 @@ export default class BlankProviderController extends BaseController<BlankProvide
         id: string,
         isConfirmed: boolean,
         confirmOptions?: DappRequestConfirmOptions
-    ): void => {
+    ): Promise<void> => {
         const handler = this._requestHandlers[id];
 
         if (!handler) {
             throw new Error(`Unable to confirm dapp request - id: ${id}`);
         }
 
-        handler.resolve({ isAccepted: isConfirmed, reqId: id, confirmOptions });
+        return new Promise((resolve, reject) => {
+            handler.resolve({
+                isAccepted: isConfirmed,
+                reqId: id,
+                confirmOptions,
+                callback: { resolve, reject },
+            });
+        });
     };
 
     /**

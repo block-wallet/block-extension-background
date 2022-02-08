@@ -6,7 +6,7 @@ We have an official zendesk board with a detailed [FAQ](https://help.goblank.io/
 
 ## Did you find a bug?
 
-- **Ensure the bug was not already reported** by searching on GitHub under [Issues](https://github.com/Blank-Wallet/extension-background/issues).
+- **Ensure the bug was not already reported** by searching on GitHub under [Issues](https://github.com/Block-Wallet/extension-background/issues).
 
 ## Did you write a patch that fixes a bug?
 
@@ -20,10 +20,10 @@ We have an official zendesk board with a detailed [FAQ](https://help.goblank.io/
 
 ## Did you fix whitespace, format code, or make a purely cosmetic patch?
 
-We are using ESlint to format the code, you can see the configuration inside the [editorconfig](https://github.com/Blank-Wallet/extension-background/blob/master/.editorconfig) file, so changes that are cosmetic in nature and do not add anything substantial to the stability or functionality won't be accepted.
+We are using ESlint to format the code, you can see the configuration inside the [editorconfig](https://github.com/Block-Wallet/extension-background/blob/master/.editorconfig) file, so changes that are cosmetic in nature and do not add anything substantial to the stability or functionality won't be accepted.
 
 ## How to release a new version?
 
 - Create a pull request.
 - Assign your reviewers and create a conversation thread if it's needed.
-- run [tag](https://github.com/Blank-Wallet/extension-background/actions/workflows/tag.yml) workflow specifying a tag and optionally the commit and a message
+- run [tag](https://github.com/Block-Wallet/extension-background/actions/workflows/tag.yml) workflow specifying a tag and optionally the commit and a message

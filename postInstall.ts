@@ -226,6 +226,7 @@ const get = async <T>(url: string): Promise<T> => {
 
     // exceptions
     ratesList['FTM'] = 'fantom';
+    ratesList['ETH'] = 'ethereum';
 
     writeFileSync('rates-ids-list.json', ratesList);
 })();

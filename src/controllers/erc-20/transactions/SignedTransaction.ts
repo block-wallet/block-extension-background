@@ -15,7 +15,6 @@ import {
 } from '../../transactions/utils/types';
 import {
     gasMaxFeePerGasParamNotPresentError,
-    gasMaxPriorityFeePerGasParamNotPresentError,
     gasPriceParamNotPresentError,
     populatedTransactionParamNotPresentError,
     transactionIdParamNotPresentError,
@@ -34,7 +33,7 @@ import log from 'loglevel';
 
 const GAS_LIMIT = 2e6;
 
-export interface PopulatedTransactionParams {}
+export interface PopulatedTransactionParams { }
 
 export interface TransactionFeeData {
     maxFeePerGas?: BigNumber;
@@ -131,8 +130,7 @@ export interface SignedTransactionProps extends TokenTransactionProps {
  */
 export abstract class SignedTransaction
     extends TokenTransactionController
-    implements ISignedTransaction
-{
+    implements ISignedTransaction {
     protected readonly _transactionController: TransactionController;
     protected readonly _preferencesController: PreferencesController;
     private readonly _fallbackTransactionGasLimit?: BigNumber;
@@ -229,9 +227,6 @@ export abstract class SignedTransaction
             if (!bnGreaterThanZero(feeData.maxFeePerGas)) {
                 throw gasMaxFeePerGasParamNotPresentError;
             }
-            if (!bnGreaterThanZero(feeData.maxPriorityFeePerGas)) {
-                throw gasMaxPriorityFeePerGasParamNotPresentError;
-            }
         } else {
             if (!bnGreaterThanZero(feeData.gasPrice)) {
                 throw gasPriceParamNotPresentError;
@@ -248,17 +243,17 @@ export abstract class SignedTransaction
                 : feeData.gasLimit;
 
         const { transactionMeta: meta } =
-            await this._transactionController.addTransaction(
-                {
+            await this._transactionController.addTransaction({
+                transaction: {
                     ...populatedTransaction,
                     from: this._preferencesController.getSelectedAddress(),
                     ...feeData,
                     nonce: advancedData?.customNonce,
                 },
-                'blank',
-                false,
-                transactionCategory
-            );
+                origin: 'blank',
+                waitForConfirmation: false,
+                customCategory: transactionCategory,
+            });
 
         return meta;
     }

@@ -127,10 +127,12 @@ const initialState: BlankAppState = {
         localeInfo: 'en-US',
         nativeCurrency: 'usd',
         showTestNetworks: false,
+        antiPhishingImage: '',
         popupTab: 'activity',
         settings: {
             hideAddressWarning: false, // Shown by default,
             subscribedToReleaseaNotes: true,
+            useAntiPhishingProtection: true,
         },
         releaseNotesSettings: {
             lastVersionUserSawNews: '0.1.3',

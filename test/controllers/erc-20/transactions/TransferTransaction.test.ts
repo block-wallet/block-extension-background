@@ -1,7 +1,6 @@
 import {
     amountParamNotPresentError,
     gasMaxFeePerGasParamNotPresentError,
-    gasMaxPriorityFeePerGasParamNotPresentError,
     gasPriceParamNotPresentError,
     tokenAddressParamNotPresentError,
     TokenController,
@@ -304,30 +303,6 @@ describe('TransferTransaction implementation', function () {
                     );
                 } catch (e: any) {
                     expect(e).equal(gasMaxFeePerGasParamNotPresentError);
-                }
-            });
-            it('Should fail - maxPriorityFeePerGas not present', async () => {
-                sinon
-                    .stub(networkController, 'getEIP1559Compatibility')
-                    .callsFake(() => new Promise((resolve) => resolve(true)));
-
-                try {
-                    await transferTransaction.addAsNewTransaction(
-                        {
-                            tokenAddress: daiAddress,
-                            to: accounts.goerli[1].address,
-                            amount: BigNumber.from(100),
-                        },
-                        {
-                            maxFeePerGas: BigNumber.from(1),
-                            maxPriorityFeePerGas: BigNumber.from(0),
-                            gasLimit: BigNumber.from(0),
-                        }
-                    );
-                } catch (e: any) {
-                    expect(e).equal(
-                        gasMaxPriorityFeePerGasParamNotPresentError
-                    );
                 }
             });
             it('Should add an unnaproval transaction', async () => {

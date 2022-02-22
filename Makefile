@@ -2,6 +2,7 @@ TS_NODE_PROJECT			 := ./tsconfig.json
 TS_NODE_COMPILER_OPTIONS := $(shell echo {\"module\": \"commonjs\" })
 BRANCH					 := $(shell git symbolic-ref --short -q HEAD | sed 's/[\.\/]/-/g')
 TS_CONFIG_PATHS 		 := true
+ENVIRONMENT				 ?= dev
 export
 
 #test:
@@ -14,7 +15,7 @@ test/background:
 build/background:
 	yarn run postinstall
 
-	@if [ $(BRANCH) != "master" ]; then \
+	@if [ "$(ENVIRONMENT)" == "dev" ]; then \
 		npx webpack --config ./webpack/webpack.dev.js; \
 	else \
 		npx webpack --config ./webpack/webpack.config.js; \

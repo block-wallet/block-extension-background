@@ -100,6 +100,21 @@ export interface FeeMarketEIP1559Values {
 }
 
 /**
+ * @property transaction - Transaction Object
+ * @property origin - Domain origin to append to the generated TransactionMeta
+ * @property waitForConfirmation - Wait until the transaction is confirmed to resolve the tx hash
+ * @property customCategory - Transaction category (If sent auto detection will be disabled)
+ * @property originId - Provider instance ID
+ */
+export interface AddTransactionParams {
+    transaction: TransactionParams;
+    origin: string;
+    waitForConfirmation?: boolean;
+    customCategory?: TransactionCategories;
+    originId?: string;
+}
+
+/**
  * @type TransactionConfig
  *
  * Transaction controller configuration
@@ -180,14 +195,6 @@ export const SPEED_UP_RATE = {
     numerator: 11,
     denominator: 10,
 };
-
-/**
- * The result of determineTransactionCategory
- */
-interface TransactionCategoryResponse {
-    transactionCategory: TransactionCategories;
-    methodSignature?: ContractMethodSignature;
-}
 
 /**
  * Controller responsible for submitting and managing transactions
@@ -426,19 +433,19 @@ export class TransactionController extends BaseController<
      * unique transaction id will be generated, and gas and gasPrice will be calculated
      * if not provided.
      *
-     * @param transaction - The transaction object to add.
-     * @param origin - The domain origin to append to the generated TransactionMeta.
-     * @param waitForConfirmation - Whether to wait for the transaction to be confirmed.
      * @returns Object containing a promise resolving to the transaction hash if approved.
      */
-    public async addTransaction(
-        transaction: TransactionParams,
-        origin: string,
+    public async addTransaction({
+        transaction,
+        origin,
         waitForConfirmation = false,
-        customCategory?: TransactionCategories
-    ): Promise<Result> {
+        customCategory,
+        originId,
+    }: AddTransactionParams): Promise<Result> {
         const { chainId } = this._networkController.network;
         const transactions = [...this.store.getState().transactions];
+        let transactionCategory: TransactionCategories | undefined =
+            customCategory;
 
         transaction.chainId = chainId;
         transaction = normalizeTransaction(transaction);
@@ -474,13 +481,10 @@ export class TransactionController extends BaseController<
             }
         }
 
-        let transactionCategory: TransactionCategories | undefined;
-
-        if (customCategory) {
-            transactionCategory = customCategory;
-        } else if (transaction.data) {
-            transactionCategory = SignedTransaction.checkPresetCategories(
-                transaction.data
+        if (!transactionCategory) {
+            transactionCategory = this.resolveTransactionCategory(
+                transaction.data,
+                transaction.to
             );
         }
 
@@ -491,22 +495,13 @@ export class TransactionController extends BaseController<
             status: TransactionStatus.UNAPPROVED,
             time: Date.now(),
             transactionParams: transaction,
-            transactionCategory: transactionCategory,
+            transactionCategory,
             verifiedOnBlockchain: false,
             loadingGasValues: true,
             blocksDropCount: 0,
             metaType: MetaType.REGULAR,
+            originId,
         };
-
-        let categoryAndMethodSignature: Promise<
-            TransactionCategoryResponse | undefined
-        >;
-
-        if (!transactionCategory) {
-            // determine transaction category of the tx asynchronously
-            categoryAndMethodSignature =
-                this.determineTransactionCategory(transactionMeta);
-        }
 
         try {
             // Check for ERC20 approval
@@ -570,21 +565,10 @@ export class TransactionController extends BaseController<
             transactions: this.trimTransactionsForState(transactions),
         });
 
-        // if transaction category was determined in time, update the transaction
         if (!transactionCategory) {
-            categoryAndMethodSignature!.then((transactionCategoryResponse) => {
-                const txMeta = this.getTransaction(transactionMeta.id);
-
-                const newTxMeta = {
-                    ...txMeta!,
-                    transactionCategory:
-                        transactionCategoryResponse?.transactionCategory,
-                    methodSignature:
-                        transactionCategoryResponse?.methodSignature,
-                };
-
-                this.updateTransaction(newTxMeta);
-            });
+            this.setTransactionCategory(transactionMeta.id);
+        } else {
+            this.setMethodSignature(transactionMeta.id);
         }
 
         return { result, transactionMeta };
@@ -1279,7 +1263,12 @@ export class TransactionController extends BaseController<
         if (index < 0) return;
 
         // Update transaction
-        const { status: oldStatus, advancedData } = transactions[index];
+        const {
+            status: oldStatus,
+            advancedData,
+            transactionCategory,
+            methodSignature,
+        } = transactions[index];
 
         // Check for token allowance update
         if (
@@ -1300,6 +1289,15 @@ export class TransactionController extends BaseController<
             );
 
             transactionMeta.transactionParams.data = txData;
+        }
+
+        // If category and method signature are defined, don't override
+        if (transactionCategory) {
+            transactionMeta.transactionCategory = transactionCategory;
+        }
+
+        if (methodSignature) {
+            transactionMeta.methodSignature = methodSignature;
         }
 
         transactions[index] = transactionMeta;
@@ -1639,6 +1637,7 @@ export class TransactionController extends BaseController<
 
         // Transaction was confirmed, check if this transaction
         // replaced another one and transition it to failed
+        // (unless is already on a final state)
         const { transactions } = this.store.getState();
         [...transactions].forEach((t) => {
             if (
@@ -1647,7 +1646,8 @@ export class TransactionController extends BaseController<
                 compareAddresses(
                     t.transactionParams.from,
                     meta.transactionParams.from
-                )
+                ) &&
+                !this.isFinalState(t.status)
             ) {
                 // If nonce is the same but id isn't, the transaction was replaced
                 this.failTransaction(
@@ -1868,73 +1868,116 @@ export class TransactionController extends BaseController<
     };
 
     /**
-     * determineTransactionCategory
+     * Tries to synchronously resolve the transaction category
      *
-     * It determines the transaction category
-     *
-     * @param transactionMeta The transaction object
-     * @returns {TransactionCategories} The transaction category and method signature
+     * @param callData Transaction data
+     * @param to Transaction destination
      */
-    public async determineTransactionCategory(
-        transactionMeta: TransactionMeta
-    ): Promise<TransactionCategoryResponse | undefined> {
-        const { data, to } = transactionMeta.transactionParams;
-        let methodSignature: ContractMethodSignature | undefined;
-
-        if (transactionMeta.transactionCategory) {
-            if (
-                transactionMeta.transactionCategory ===
-                    TransactionCategories.CONTRACT_INTERACTION &&
-                data
-            ) {
-                methodSignature = await this.getMethodSignature(data);
-            }
-
-            return {
-                transactionCategory: transactionMeta.transactionCategory,
-                methodSignature,
-            };
+    public resolveTransactionCategory(
+        callData?: string,
+        to?: string
+    ): TransactionCategories | undefined {
+        if (!callData) {
+            return undefined;
         }
 
-        let transactionCategory;
-
-        if (data && !to) {
-            transactionCategory = TransactionCategories.CONTRACT_DEPLOYMENT;
+        if (!to) {
+            return TransactionCategories.CONTRACT_DEPLOYMENT;
         }
 
-        let code;
+        try {
+            const category = SignedTransaction.checkPresetCategories(callData);
 
-        if (!transactionCategory) {
-            try {
-                code = await this._networkController.getProvider().getCode(to!);
-            } catch (e) {
+            return category;
+        } catch (error) {
+            // Probably not an erc20 transaction
+            log.debug(error);
+            return undefined;
+        }
+    }
+
+    /**
+     * Set the transaction category
+     *
+     * @param transactionId The transaction id
+     */
+    public async setTransactionCategory(transactionId: string): Promise<void> {
+        const transactionMeta = this.getTransaction(transactionId);
+        let code: string | null;
+
+        if (!transactionMeta) {
+            log.error("Couldn't find transaction data");
+            return;
+        }
+
+        try {
+            if (transactionMeta.transactionParams.to) {
+                code = await this._networkController
+                    .getProvider()
+                    .getCode(transactionMeta.transactionParams.to);
+
+                if (!code || code === '0x' || code === '0x0') {
+                    code = null;
+                }
+            } else {
                 code = null;
-                log.warn(e);
             }
-
-            const codeIsEmpty = !code || code === '0x' || code === '0x0';
-
-            transactionCategory = codeIsEmpty
-                ? TransactionCategories.SENT_ETHER
-                : TransactionCategories.CONTRACT_INTERACTION;
-
-            if (
-                transactionCategory ===
-                    TransactionCategories.CONTRACT_INTERACTION &&
-                data
-            ) {
-                methodSignature = await this.getMethodSignature(data);
-            }
+        } catch (e) {
+            code = null;
+            log.warn(e);
         }
 
-        return { transactionCategory, methodSignature };
+        const newTransactionMeta = {
+            ...transactionMeta,
+            transactionCategory: code
+                ? TransactionCategories.CONTRACT_INTERACTION
+                : TransactionCategories.SENT_ETHER,
+        };
+
+        this.updateTransaction(newTransactionMeta);
+
+        this.setMethodSignature(transactionMeta.id);
+    }
+
+    /**
+     * Set the transaction method signature
+     *
+     * @param transactionId The transaction id
+     */
+    public async setMethodSignature(transactionId: string) {
+        const transactionMeta = this.getTransaction(transactionId);
+
+        if (!transactionMeta) {
+            log.error("Couldn't find transaction data");
+            return;
+        }
+
+        const { transactionCategory, transactionParams } = transactionMeta;
+
+        if (
+            transactionCategory ===
+                TransactionCategories.CONTRACT_INTERACTION &&
+            transactionParams.data
+        ) {
+            const methodSignature = await this.getMethodSignature(
+                transactionParams.data
+            );
+
+            if (methodSignature) {
+                const newTransactionMeta = {
+                    ...transactionMeta,
+                    methodSignature,
+                };
+
+                this.updateTransaction(newTransactionMeta);
+            }
+        }
     }
 
     /**
      * get readable transaction method
      *
      * @param data the transaction data
-     * @param id the transaction id
      * @returns The method signature or undefined
      */
     public async getMethodSignature(

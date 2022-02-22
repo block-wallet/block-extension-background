@@ -191,8 +191,8 @@ export class SwapController {
      */
     public executeSwap = async (swap: Swap): Promise<string> => {
         const { transactionMeta: meta, result } =
-            await this._transactionController.addTransaction(
-                {
+            await this._transactionController.addTransaction({
+                transaction: {
                     from: swap.tx.from,
                     to: swap.tx.to,
                     data: swap.tx.data,
@@ -200,8 +200,8 @@ export class SwapController {
                     gasPrice: BigNumber.from(swap.tx.gasPrice),
                     gasLimit: BigNumber.from(swap.tx.gas),
                 },
-                'swap'
-            );
+                origin: 'swap',
+            });
 
         meta.transactionCategory = TransactionCategories.BLANK_SWAP;
         this._transactionController.updateTransaction(meta);

@@ -70,7 +70,7 @@ import type {
     RequestCalculateSendTransactionGasLimit,
     RequestRejectTransaction,
     RequestSetIdleTimeout,
-    RequestSetMetadata,
+    RequestSetIcon,
     RequestBlankGetInstanceTokenAllowance,
     RequestCalculateApproveTransactionGasLimit,
     RequestDeleteCustomToken,
@@ -89,6 +89,10 @@ import type {
     RequestCancelTransaction,
     RequestSpeedUpTransaction,
     RequestNextNonce,
+    RequestUpdateAntiPhishingImage,
+    RequestToggleAntiPhishingProtection,
+    RequestToggleReleaseNotesSubscription,
+    RequestSetNativeCurrency,
 } from '../utils/types/communication';
 
 import EventEmitter from 'events';
@@ -162,6 +166,13 @@ import { TornadoEventsService } from './blank-deposit/tornado/TornadoEventsServi
 import tornadoConfig from './blank-deposit/tornado/config/config';
 import ComposedStore from '../infrastructure/stores/ComposedStore';
 import BlockFetchController from './block-updates/BlockFetchController';
+import { generatePhishingPreventionBase64 } from '../utils/phishingPrevention';
+import {
+    Currency,
+    getCurrencies,
+    isCurrencyCodeValid,
+} from '../utils/currency';
+import { AvailableNetworks } from './blank-deposit/types';
 
 export interface BlankControllerProps {
     initState: BlankAppState;
@@ -640,6 +651,8 @@ export default class BlankController extends EventEmitter {
                 return this.openReset();
             case Messages.APP.UPDATE_POPUP_TAB:
                 return this.updatePopupTab(request as RequestUpdatePopupTab);
+            case Messages.APP.REJECT_UNCONFIRMED_REQUESTS:
+                return this.rejectUnconfirmedRequests();
             case Messages.BLANK.DEPOSIT:
                 return this.blankDeposit(request as RequestBlankDeposit);
             case Messages.BLANK.ADD_NEW_DEPOSIT_TRANSACTION:
@@ -713,11 +726,8 @@ export default class BlankController extends EventEmitter {
                 );
             case Messages.EXTERNAL.SETUP_PROVIDER:
                 return this.setupProvider(portId);
-            case Messages.EXTERNAL.SET_METADATA:
-                return this.setProviderMetadata(
-                    request as RequestSetMetadata,
-                    portId
-                );
+            case Messages.EXTERNAL.SET_ICON:
+                return this.setProviderIcon(request as RequestSetIcon, portId);
             case Messages.NETWORK.CHANGE:
                 return this.networkChange(request as RequestNetworkChange);
             case Messages.NETWORK.SET_SHOW_TEST_NETWORKS:
@@ -880,6 +890,26 @@ export default class BlankController extends EventEmitter {
                 return this.dismissWelcomeMessage();
             case Messages.WALLET.DISMISS_RELEASE_NOTES:
                 return this.dismissReleaseNotes();
+            case Messages.WALLET.TOGGLE_RELEASE_NOTES_SUBSCRIPTION:
+                return this.toggleReleaseNotesSubscription(
+                    request as RequestToggleReleaseNotesSubscription
+                );
+            case Messages.WALLET.GENERATE_ANTI_PHISHING_IMAGE:
+                return generatePhishingPreventionBase64();
+            case Messages.WALLET.UPDATE_ANTI_PHISHING_IMAGE:
+                return this.updateAntiPhishingImage(
+                    request as RequestUpdateAntiPhishingImage
+                );
+            case Messages.WALLET.TOGGLE_ANTI_PHISHING_PROTECTION:
+                return this.toggleAntiPhishingProtection(
+                    request as RequestToggleAntiPhishingProtection
+                );
+            case Messages.WALLET.SET_NATIVE_CURRENCY:
+                return this.setNativeCurrency(
+                    request as RequestSetNativeCurrency
+                );
+            case Messages.WALLET.GET_VALID_CURRENCIES:
+                return this.getAllCurrencies();
             default:
                 throw new Error(`Unable to handle message of type ${type}`);
         }
@@ -1498,11 +1528,8 @@ export default class BlankController extends EventEmitter {
      * Initialize provider site metadata
      *
      */
-    private async setProviderMetadata(
-        { siteMetadata }: RequestSetMetadata,
-        portId: string
-    ) {
-        return this.blankProviderController.setMetadata(siteMetadata, portId);
+    private async setProviderIcon({ iconURL }: RequestSetIcon, portId: string) {
+        return this.blankProviderController.setIcon(iconURL, portId);
     }
 
     /**
@@ -1537,6 +1564,26 @@ export default class BlankController extends EventEmitter {
         popupTab,
     }: RequestUpdatePopupTab): Promise<void> {
         this.preferencesController.popupTab = popupTab;
+    }
+
+    /**
+     * Rejects all open unconfirmed requests
+     */
+    private async rejectUnconfirmedRequests(): Promise<void> {
+        const { unapprovedTransactions } =
+            this.transactionController.UIStore.getState();
+
+        // Reject unnaproved transactions
+        for (const transaction in unapprovedTransactions) {
+            this.transactionController.rejectTransaction(transaction);
+        }
+
+        // Reject permission requests
+        this.permissionsController.rejectAllRequests();
+
+        // Reject all dapp requests
+        this.blankProviderController.cancelPendingDAppRequests();
+        this.blankProviderController.rejectUnlocks();
     }
 
     /**
@@ -1661,16 +1708,16 @@ export default class BlankController extends EventEmitter {
         // Add unapproved trasaction
         const {
             transactionMeta: { id },
-        } = await this.transactionController.addTransaction(
-            {
+        } = await this.transactionController.addTransaction({
+            transaction: {
                 to,
                 from: this.preferencesController.getSelectedAddress(),
                 value,
                 ...feeData,
                 nonce: advancedData.customNonce,
             },
-            'blank'
-        );
+            origin: 'blank',
+        });
 
         // Approve it
         try {
@@ -1705,15 +1752,15 @@ export default class BlankController extends EventEmitter {
     }: RequestAddAsNewSendTransaction): Promise<TransactionMeta> {
         if (this.tokenController.isNativeToken(address)) {
             const { transactionMeta } =
-                await this.transactionController.addTransaction(
-                    {
+                await this.transactionController.addTransaction({
+                    transaction: {
                         to,
                         from: this.preferencesController.getSelectedAddress(),
                         value: BigNumber.from(value),
                         ...feeData,
                     },
-                    'blank'
-                );
+                    origin: 'blank',
+                });
 
             const { nativeCurrency, iconUrls } = this.networkController.network;
             const logo = iconUrls ? iconUrls[0] : '';
@@ -1917,6 +1964,12 @@ export default class BlankController extends EventEmitter {
         // Set account tracker
         this.accountTrackerController.addPrimaryAccount(account);
 
+        // Create and assign to the Wallet an anti phishing image
+        const base64Image = await generatePhishingPreventionBase64();
+        this.preferencesController.assignNewPhishingPreventionImage(
+            base64Image
+        );
+
         // Unlock when account is created so vault will be ready after onboarding
         return this.appStateController.unlock(password);
     }
@@ -1976,7 +2029,7 @@ export default class BlankController extends EventEmitter {
         this.preferencesController.setShowWelcomeMessage(true);
 
         // Get manifest version and init the release notes settings
-        const appVersion = await getVersion();
+        const appVersion = getVersion();
         this.preferencesController.initReleaseNotesSettings(appVersion);
 
         // Set account tracker
@@ -1988,7 +2041,16 @@ export default class BlankController extends EventEmitter {
         // Asynchronously import the deposits
         await this.blankDepositController.initialize();
 
+        // Force network change to mainnet
+        await this.networkController.setNetwork(AvailableNetworks.MAINNET);
+
         this.blankDepositController.importDeposits(password, seedPhrase);
+
+        // Create and assign to the Wallet an anti phishing image
+        const base64Image = await generatePhishingPreventionBase64();
+        this.preferencesController.assignNewPhishingPreventionImage(
+            base64Image
+        );
 
         return true;
     }
@@ -2003,8 +2065,6 @@ export default class BlankController extends EventEmitter {
         password,
         seedPhrase,
     }: RequestWalletReset): Promise<boolean> {
-        // if the user is in a network that does not support tornado the reset process fails
-        await this.networkController.setNetwork('MAINNET');
         return this.walletImport({ password, seedPhrase, reImport: true });
     }
 
@@ -2475,5 +2535,66 @@ export default class BlankController extends EventEmitter {
         address,
     }: RequestNextNonce): Promise<number | undefined> {
         return this.transactionController.getNextNonce(address);
+    }
+
+    /**
+     * Updates the AntiPhishingImage
+     * @param antiPhishingImage base64 Image to be assigned to the user's profile
+     *
+     */
+    private updateAntiPhishingImage({
+        antiPhishingImage,
+    }: RequestUpdateAntiPhishingImage): Promise<void> {
+        return this.preferencesController.assignNewPhishingPreventionImage(
+            antiPhishingImage
+        );
+    }
+
+    /**
+     * Sets whether the user wants to have the phishing protection or not
+     * @param antiPhishingProtectionEnabeld flags that indicates the anti-phising feature status
+     *
+     */
+    private toggleAntiPhishingProtection({
+        antiPhishingProtectionEnabeld,
+    }: RequestToggleAntiPhishingProtection) {
+        this.preferencesController.updateAntiPhishingProtectionStatus(
+            antiPhishingProtectionEnabeld
+        );
+    }
+
+    /**
+     * Sets whether the user wants to have the phishing protection or not
+     * @param antiPhishingProtectionEnabeld flags that indicates the anti-phising feature status
+     *
+     */
+    private toggleReleaseNotesSubscription({
+        releaseNotesSubscriptionEnabled,
+    }: RequestToggleReleaseNotesSubscription) {
+        this.preferencesController.updateReleseNotesSubscriptionStatus(
+            releaseNotesSubscriptionEnabled
+        );
+    }
+
+    /**
+     * Updates the user's native currency preference and fires the exchange rates update
+     * @param currencyCode the user selected currency
+     *
+     */
+    private setNativeCurrency({ currencyCode }: RequestSetNativeCurrency) {
+        if (!isCurrencyCodeValid(currencyCode)) {
+            return Promise.reject('Invalid currency code.');
+        }
+        this.preferencesController.nativeCurrency = currencyCode;
+        return this.exchangeRatesController.updateExchangeRates();
+    }
+
+    /**
+     * Fetches all the currency options
+     * @returns all the currency options sorted alphabetically
+     *
+     */
+    private getAllCurrencies(): Currency[] {
+        return getCurrencies();
     }
 }

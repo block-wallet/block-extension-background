@@ -178,9 +178,11 @@ const initialState: BlankAppState & {
         newAddedKeyOnLevel2: '',
         showTestNetworks: false,
         popupTab: 'activity',
+        antiPhishingImage: '',
         settings: {
             hideAddressWarning: false,
             subscribedToReleaseaNotes: true,
+            useAntiPhishingProtection: true,
         },
         releaseNotesSettings: {
             lastVersionUserSawNews: '0.1.3',
@@ -356,12 +358,14 @@ describe('State reconciler', () => {
                 userTokens: {
                     USDT: '0xdac17f958d2ee523a2206206994597c13d831ec7',
                 },
+                antiPhishingImage: '',
                 showTestNetworks: true,
                 showWelcomeMessage: false,
                 popupTab: 'activity',
                 settings: {
                     subscribedToReleaseaNotes: true,
                     hideAddressWarning: false,
+                    useAntiPhishingProtection: true,
                 },
                 releaseNotesSettings: {
                     lastVersionUserSawNews: '0.1.3',

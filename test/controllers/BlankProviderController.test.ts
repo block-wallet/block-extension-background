@@ -16,6 +16,9 @@ import {
     JSONRPCMethod,
     SubscriptionType,
     Block,
+    DappReq,
+    DappRequest,
+    DappRequestParams,
 } from '@blank/background/utils/types/ethereum';
 import { PreferencesController } from '@blank/background/controllers/PreferencesController';
 import { TokenController } from '../../src/controllers/erc-20/TokenController';
@@ -40,7 +43,7 @@ const TX_HASH =
     '0x3979f7ae255171ae6c6fd1c625219b45e2da7e52e6401028c29f0f27581af601';
 const TEXT_FOR_HASH = 'HASH ME';
 
-describe('Blank provider controller', function () {
+describe('Blank Provider Controller', function () {
     const defaultIdleTimeout = 5;
     const initialLastActiveTime = new Date().getTime();
     const portId = '7e24f69d-c740-4eb3-9c6e-4d47df491005';
@@ -60,11 +63,76 @@ describe('Blank provider controller', function () {
     providerInstances[portId] = {
         port: chrome.runtime.connect(),
         tabId: 420,
+        windowId: 404,
         origin: UNI_ORIGIN,
         siteMetadata: {
             iconURL: 'https://app.uniswap.org/favicon.png',
             name: 'Uniswap',
         },
+    };
+
+    const signatureReq = {
+        type: DappReq.SIGNING,
+        params: {
+            method: 'eth_signTypedData',
+            params: {
+                address: '0x413f3536eab14074e6b2a7813b22745E41368875',
+                data: [
+                    {
+                        type: 'string',
+                        name: 'Message',
+                        value: 'Sup',
+                    },
+                    {
+                        type: 'uint32',
+                        name: 'A number',
+                        value: '420',
+                    },
+                ],
+            },
+        },
+        origin: UNI_ORIGIN,
+        siteMetadata: {
+            iconURL: 'https://app.uniswap.org/favicon.png',
+            name: 'Uniswap',
+        },
+        time: 1643931146296,
+        originId: portId,
+    };
+
+    const assetReq = {
+        type: DappReq.ASSET,
+        params: {
+            params: {
+                address: '0x6B3595068778DD592e39A122f4f5a5cF09C90fE2',
+                symbol: 'SUSHI',
+                decimals: 18,
+                image: 'https://s2.coinmarketcap.com/static/img/coins/64x64/6758.png',
+            },
+            activeAccount: '0x413f3536eab14074e6b2a7813b22745E41368875',
+            isUpdate: false,
+        },
+        origin: UNI_ORIGIN,
+        siteMetadata: {
+            iconURL: 'https://app.uniswap.org/favicon.png',
+            name: 'Uniswap',
+        },
+        time: 1643931147309,
+        originId: portId,
+    };
+
+    const switchNetworkReq = {
+        type: DappReq.SWITCH_NETWORK,
+        params: {
+            chainId: 42161,
+        },
+        origin: UNI_ORIGIN,
+        siteMetadata: {
+            iconURL: 'https://app.uniswap.org/favicon.png',
+            name: 'Uniswap',
+        },
+        time: 1643932328836,
+        originId: portId,
     };
 
     let accountTrackerController: AccountTrackerController;
@@ -187,8 +255,38 @@ describe('Blank provider controller', function () {
                 ): BigNumber[] => addresses.map(() => BigNumber.from('999')),
             } as any);
         });
+
         afterEach(function () {
             sinon.restore();
+        });
+
+        it('Should cancel all requests', async function () {
+            blankProviderController.store.updateState({
+                dappRequests: {
+                    1: signatureReq as DappRequest<keyof DappRequestParams>,
+                    2: assetReq,
+                    3: switchNetworkReq,
+                },
+            });
+
+            for (let i = 1; i < 4; i++) {
+                blankProviderController['_requestHandlers'][`${i}`] = {
+                    reject: (error: Error) => {},
+                    resolve: (data: any) => {},
+                };
+            }
+
+            let dappRequests =
+                blankProviderController.store.getState().dappRequests;
+
+            expect(dappRequests).to.be.not.empty;
+
+            blankProviderController.cancelPendingDAppRequests();
+
+            dappRequests =
+                blankProviderController.store.getState().dappRequests;
+
+            expect(dappRequests).to.be.empty;
         });
 
         it('Should get balance', async function () {

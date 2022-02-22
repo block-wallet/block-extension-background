@@ -14,6 +14,13 @@ const MockDepositController = () => {
         (password: string, mnemonic: string) => Promise.resolve()
     );
 
+    sinon.stub(mockedDepositController, 'UIStore').get(() => ({
+        subscribe: () => {},
+        getState: () => ({
+            isImportingDeposits: false,
+        }),
+    }));
+
     return mockedDepositController as unknown as StubbedClass<BlankDepositController>;
 };
 

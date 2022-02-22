@@ -217,6 +217,23 @@ export class TornadoService
     }
 
     /**
+     * checkIfReconstructionFailed
+     *
+     * It checks whether the browser was closed during deposit reconstruction
+     */
+    public async checkIfReconstructionFailed(
+        chainId: number = this._networkController.network.chainId
+    ) {
+        const { isImported, isLoading } = await this.getImportingStatus(
+            chainId
+        );
+
+        if (isImported && isLoading) {
+            await this._blankDepositVault.failReconstruction(chainId);
+        }
+    }
+
+    /**
      * isUnlocked
      *
      * @returns Whether the notes vault is unlocked
@@ -770,8 +787,11 @@ export class TornadoService
 
         await this._notesService.initRootPath(mnemonic);
 
-        // Check if a pending deposit transaction was approved while the app was locked
         if (isSupported) {
+            // Check for reconstruction phase not completed
+            await this.checkIfReconstructionFailed();
+
+            // Check if a pending deposit transaction was approved while the app was locked
             this.checkCurrentNetworkPendingDeposits();
         }
     }

@@ -56,6 +56,7 @@ export interface DappRequest<Type extends DappRequestType> {
     params: DappRequestParams[Type];
     origin: string;
     siteMetadata: SiteMetadata;
+    originId: string;
 
     /**
      * The time at it was requested

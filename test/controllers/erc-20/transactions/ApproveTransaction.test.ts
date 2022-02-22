@@ -6,7 +6,6 @@ import {
     transactionIdParamNotPresentError,
     transactionNotFound,
     gasMaxFeePerGasParamNotPresentError,
-    gasMaxPriorityFeePerGasParamNotPresentError,
     TokenController,
 } from '../../../../src/controllers/erc-20/TokenController';
 import { expect } from 'chai';
@@ -300,30 +299,6 @@ describe('ApproveTransaction implementation', function () {
                     );
                 } catch (e: any) {
                     expect(e).equal(gasMaxFeePerGasParamNotPresentError);
-                }
-            });
-            it('Should fail - maxPriorityFeePerGas not present', async () => {
-                sinon
-                    .stub(networkController, 'getEIP1559Compatibility')
-                    .callsFake(() => new Promise((resolve) => resolve(true)));
-
-                try {
-                    await approveTransaction.addAsNewTransaction(
-                        {
-                            tokenAddress: daiAddress,
-                            spender: daiAddress,
-                            amount: BigNumber.from(100),
-                        },
-                        {
-                            maxFeePerGas: BigNumber.from(1),
-                            maxPriorityFeePerGas: BigNumber.from(0),
-                            gasLimit: BigNumber.from(0),
-                        }
-                    );
-                } catch (e: any) {
-                    expect(e).equal(
-                        gasMaxPriorityFeePerGasParamNotPresentError
-                    );
                 }
             });
             it('Should add an unnaproval transaction', async () => {

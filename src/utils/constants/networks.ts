@@ -95,7 +95,7 @@ export const INITIAL_NETWORKS: Networks = {
         features: [FEATURES.SENDS, FEATURES.SWAPS],
         ens: false,
         showGasLevels: false,
-        rpcUrls: ['https://arb1.arbitrum.io/rpc'],
+        rpcUrls: ['https://arbitrum-node.blockwallet.io'],
         blockExplorerUrls: ['https://arbiscan.io'],
         etherscanApiUrl: 'https://api.arbiscan.io',
         actionsTimeIntervals: ACTIONS_TIME_INTERVALS_DEFAULT_VALUES,
@@ -117,7 +117,7 @@ export const INITIAL_NETWORKS: Networks = {
         features: [FEATURES.SENDS],
         ens: false,
         showGasLevels: false,
-        rpcUrls: ['https://mainnet.optimism.io'],
+        rpcUrls: ['https://optimism-node.blockwallet.io'],
         blockExplorerUrls: ['https://optimistic.etherscan.io'],
         etherscanApiUrl: 'https://api-optimistic.etherscan.io',
         actionsTimeIntervals: ACTIONS_TIME_INTERVALS_DEFAULT_VALUES,
@@ -134,7 +134,7 @@ export const INITIAL_NETWORKS: Networks = {
         },
         isCustomNetwork: false,
         iconUrls: [
-            'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/smartchain/info/logo.png',
+            'https://raw.githubusercontent.com/block-wallet/assets/master/blockchains/smartchain/info/logo.png',
         ],
         enable: true,
         test: false,
@@ -142,7 +142,7 @@ export const INITIAL_NETWORKS: Networks = {
         features: [FEATURES.SENDS, FEATURES.SWAPS],
         ens: false,
         showGasLevels: true,
-        rpcUrls: ['https://bsc-dataseed1.binance.org:443'],
+        rpcUrls: ['https://bsc-node.blockwallet.io'],
         blockExplorerUrls: ['https://bscscan.com'],
         etherscanApiUrl: 'https://api.bscscan.com',
         actionsTimeIntervals: ACTIONS_TIME_INTERVALS_DEFAULT_VALUES,
@@ -158,7 +158,7 @@ export const INITIAL_NETWORKS: Networks = {
             decimals: 18,
         },
         iconUrls: [
-            'https://polygon.technology/wp-content/uploads/2021/05/matic-token-icon.svg',
+            'https://raw.githubusercontent.com/block-wallet/assets/master/blockchains/polygon/info/logo.png',
         ],
         isCustomNetwork: false,
         gasLowerCap: {
@@ -188,7 +188,7 @@ export const INITIAL_NETWORKS: Networks = {
             decimals: 18,
         },
         iconUrls: [
-            'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/avalanchec/info/logo.png',
+            'https://raw.githubusercontent.com/block-wallet/assets/master/blockchains/avalanchec/info/logo.png',
         ],
         isCustomNetwork: false,
         gasLowerCap: {
@@ -218,7 +218,7 @@ export const INITIAL_NETWORKS: Networks = {
             decimals: 18,
         },
         iconUrls: [
-            'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/fantom/info/logo.png',
+            'https://raw.githubusercontent.com/block-wallet/assets/master/blockchains/fantom/info/logo.png',
         ],
         isCustomNetwork: false,
         gasLowerCap: {
@@ -337,7 +337,7 @@ export const INITIAL_NETWORKS: Networks = {
         },
         isCustomNetwork: false,
         iconUrls: [
-            'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/smartchain/info/logo.png',
+            'https://raw.githubusercontent.com/block-wallet/assets/master/blockchains/smartchain/info/logo.png',
         ],
         enable: true,
         test: true,
@@ -360,7 +360,7 @@ export const INITIAL_NETWORKS: Networks = {
             decimals: 18,
         },
         iconUrls: [
-            'https://polygon.technology/wp-content/uploads/2021/05/matic-token-icon.svg',
+            'https://raw.githubusercontent.com/block-wallet/assets/master/blockchains/polygon/info/logo.png',
         ],
         isCustomNetwork: false,
         gasLowerCap: {

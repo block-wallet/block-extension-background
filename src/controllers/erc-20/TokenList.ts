@@ -53,7 +53,7 @@ const NETWORK_TOKENS_LIST: INetworkTokens = {
     59: {}, // eos
     1313114: {}, // 'ether-1'
     1: {}, // ethereu
-    250: {}, // fantom:
+    250: {}, // fantom
     60: {}, // gochain
     1666600000: {}, // harmony
     128: {}, // heco
@@ -82,14 +82,14 @@ const NETWORK_TOKENS_LIST: INetworkTokens = {
             type: 'ERC20',
             address: '0xdc31Ee1784292379Fbb2964b3B9C4124D8F89C60',
             decimals: 18,
-            logo: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0x6B175474E89094C44Da98b954EedeAC495271d0F/logo.png',
+            logo: 'https://raw.githubusercontent.com/block-wallet/assets/master/blockchains/ethereum/assets/0x6B175474E89094C44Da98b954EedeAC495271d0F/logo.png',
         },
         '0x822397d9a55d0fefd20F5c4bCaB33C5F65bd28Eb': {
             decimals: 8,
             symbol: 'CDAI',
             name: 'Compound Dai',
             address: '0x822397d9a55d0fefd20F5c4bCaB33C5F65bd28Eb',
-            logo: 'https://raw.githubusercontent.com/MetaMask/contract-metadata/master/images/ctoken-dai.svg',
+            logo: 'https://raw.githubusercontent.com/block-wallet/assets/master/blockchains/ethereum/assets/0x5d3a536E4D6DbD6114cc1Ead35777bAB948E3643/logo.png',
             type: 'ERC20',
         },
         '0xD87Ba7A50B2E7E660f678A895E4B72E7CB4CCd9C': {
@@ -97,7 +97,7 @@ const NETWORK_TOKENS_LIST: INetworkTokens = {
             symbol: 'USDC',
             name: 'USDC',
             address: '0xD87Ba7A50B2E7E660f678A895E4B72E7CB4CCd9C',
-            logo: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png',
+            logo: 'https://raw.githubusercontent.com/block-wallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png',
             type: 'ERC20',
         },
         '0xb7FC2023D96AEa94Ba0254AA5Aeb93141e4aad66': {
@@ -105,7 +105,7 @@ const NETWORK_TOKENS_LIST: INetworkTokens = {
             symbol: 'USDT',
             name: 'Tether USD',
             address: '0xb7FC2023D96AEa94Ba0254AA5Aeb93141e4aad66',
-            logo: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xdAC17F958D2ee523a2206206994597C13D831ec7/logo.png',
+            logo: 'https://raw.githubusercontent.com/block-wallet/assets/master/blockchains/ethereum/assets/0xdAC17F958D2ee523a2206206994597C13D831ec7/logo.png',
             type: 'ERC20',
         },
         '0xC04B0d3107736C32e19F1c62b2aF67BE61d63a05': {
@@ -113,7 +113,7 @@ const NETWORK_TOKENS_LIST: INetworkTokens = {
             symbol: 'WBTC',
             name: 'Wrapped BTC',
             address: '0xC04B0d3107736C32e19F1c62b2aF67BE61d63a05',
-            logo: 'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599/logo.png',
+            logo: 'https://raw.githubusercontent.com/block-wallet/assets/master/blockchains/ethereum/assets/0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599/logo.png',
             type: 'ERC20',
         },
     }, // goerli
@@ -122,6 +122,36 @@ const NETWORK_TOKENS_LIST: INetworkTokens = {
     4: {}, // rinkeby
     97: {}, // bsc testnet
     1337: {}, // localhost
+};
+
+const NETWORKS_NAMES: { [key in number]: string } = {
+    42161: 'arbitrum',
+    43114: 'avalanchec',
+    820: 'callisto',
+    42220: 'celo',
+    61: 'classic',
+    64: 'ellaism',
+    59: 'eos',
+    1313114: 'ether-1',
+    1: 'ethereum',
+    250: 'fantom',
+    60: 'gochain',
+    1666600000: 'harmony',
+    128: 'heco',
+    4689: 'iotex',
+    71393: 'nervos',
+    58: 'ontology',
+    10: 'optimism',
+    77: 'poa',
+    137: 'polygon',
+    10000: 'smartbch',
+    56: 'smartchain',
+    361: 'theta',
+    108: 'thundertoken:',
+    88: 'tomochain',
+    888: 'wanchain',
+    100: 'xdai',
+    50: 'xdc',
 };
 
 export const NETWORK_TOKENS_LIST_ARRAY: { [chainId in number]: string[] } = {};
@@ -133,19 +163,63 @@ for (const chainId in tokenList) {
     for (const address in tokenList[chainId]) {
         const token = tokenList[chainId][address];
 
+        let logo = '';
+        if ('l' in token) {
+            logo = 'https://' + token['l'];
+        } else {
+            logo = `https://raw.githubusercontent.com/block-wallet/assets/master/blockchains/${
+                NETWORKS_NAMES[parseInt(chainId)]
+            }/assets/${address}/logo.png`;
+        }
+
+        let type = '';
+        if ('t' in token) {
+            switch (token['t']) {
+                case 'E':
+                    type = 'ERC20';
+                    break;
+                case 'B':
+                    type = 'BEP20';
+                    break;
+                case 'P':
+                    type = 'POLYGON';
+                    break;
+                case 'F':
+                    type = 'FANTOM';
+                    break;
+                case 'W':
+                    type = 'WAN20';
+                    break;
+                case 'C':
+                    type = 'CELO';
+                    break;
+                case 'A':
+                    type = 'AVALANCHE';
+                    break;
+                case 'ET':
+                    type = 'ETC20';
+                    break;
+                case 'T':
+                    type = 'TT20';
+                    break;
+                default:
+                    type = token['t'];
+            }
+        }
+
         const iToken = {
             address,
-            name: token['name'],
-            logo: token['logo'],
-            type: token['type'],
-            symbol: token['symbol'],
-            decimals: token['decimals'],
+            logo,
+            type,
+            name: token['n'],
+            symbol: token['s'],
+            decimals: token['de'],
         } as IToken;
 
-        if ('l1Bridge' in token) {
+        if ('l1' in token) {
             iToken.l1Bridge = {
-                tokenAddress: token['l1Bridge']['tokenAddress'],
-                bridgeAddress: token['l1Bridge']['bridgeAddress'],
+                tokenAddress: token['l1']['t'],
+                bridgeAddress: token['l1']['b'],
             };
         }
 

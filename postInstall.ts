@@ -20,7 +20,7 @@ const get = async <T>(url: string): Promise<T> => {
 };
 
 (async () => {
-    type Token = {
+    interface IToken {
         address: string;
         name: string;
         logo: string;
@@ -31,7 +31,99 @@ const get = async <T>(url: string): Promise<T> => {
             tokenAddress: string;
             bridgeAddress: string;
         };
-    };
+    }
+    class Token implements IToken {
+        address: string;
+        name: string;
+        logo: string;
+        type: string;
+        symbol: string;
+        decimals: number;
+        l1Bridge?: {
+            tokenAddress: string;
+            bridgeAddress: string;
+        };
+
+        constructor(token: IToken) {
+            this.address = token.address;
+            this.name = token.name;
+            this.logo =
+                typeof token.logo === 'string'
+                    ? token.logo
+                    : 'src' in token.logo
+                    ? token.logo['src']
+                    : '';
+            this.type = token.type;
+            this.symbol = token.symbol;
+            this.decimals = token.decimals;
+
+            if (token.l1Bridge) {
+                this.l1Bridge = {
+                    tokenAddress: token.l1Bridge.tokenAddress,
+                    bridgeAddress: token.l1Bridge.bridgeAddress,
+                };
+            }
+        }
+
+        public toJSON() {
+            const json: any = {
+                n: this.name,
+                l: this.logo,
+                t: this.type,
+                s: this.symbol,
+                de: this.decimals,
+                l1: this.l1Bridge
+                    ? {
+                          t: this.l1Bridge.tokenAddress,
+                          b: this.l1Bridge.bridgeAddress,
+                      }
+                    : undefined,
+            };
+
+            const pattern =
+                /https:\/\/raw\.githubusercontent\.com\/block-wallet\/assets\/master\/blockchains\/[a-zA-Z]+\/assets\/0x[a-fA-F0-9]{40}\/logo\.png/gm;
+            if (pattern.test(this.logo)) {
+                json['l'] = undefined;
+            } else {
+                json['l'] = json['l'].replace('https://', '');
+            }
+
+            switch (this.type) {
+                case 'ERC20':
+                    json['t'] = 'E';
+                    break;
+                case 'BEP20':
+                    json['t'] = 'B';
+                    break;
+                case 'POLYGON':
+                    json['t'] = 'P';
+                    break;
+                case 'FANTOM':
+                    json['t'] = 'F';
+                    break;
+                case 'WAN20':
+                    json['t'] = 'W';
+                    break;
+                case 'CELO':
+                    json['t'] = 'C';
+                    break;
+                case 'AVALANCHE':
+                    json['t'] = 'A';
+                    break;
+                case 'ETC20':
+                    json['t'] = 'ET';
+                    break;
+                case 'TT20':
+                    json['t'] = 'T';
+                    break;
+                case '':
+                    json['t'] = undefined;
+                    break;
+            }
+
+            return json;
+        }
+    }
 
     const TOKENS: { [key in number]: { [key in string]: Token } } = {};
     const NETWORKS: { [key in string]: number } = {
@@ -101,10 +193,10 @@ const get = async <T>(url: string): Promise<T> => {
                             );
 
                             if (token.status == 'active') {
-                                TOKENS[chainId][assetAddress] = {
-                                    logo: `https://assets.trustwalletapp.com/blockchains/${blockchain}/assets/${assetAddress}/logo.png`,
+                                TOKENS[chainId][assetAddress] = new Token({
+                                    logo: `https://raw.githubusercontent.com/block-wallet/assets/master/blockchains/${blockchain}/assets/${assetAddress}/logo.png`,
                                     ...token,
-                                };
+                                });
                             }
                         }
                     })
@@ -115,10 +207,10 @@ const get = async <T>(url: string): Promise<T> => {
                 );
 
                 if (token.status == 'active') {
-                    TOKENS[chainId][token.name] = {
-                        logo: `https://assets.trustwalletapp.com/blockchains/${blockchain}/info/logo.png`,
+                    TOKENS[chainId][token.name] = new Token({
+                        logo: `https://raw.githubusercontent.com/block-wallet/assets/master/blockchains/${blockchain}/info/logo.png`,
                         ...token,
-                    };
+                    });
                 }
             }
         })
@@ -135,7 +227,7 @@ const get = async <T>(url: string): Promise<T> => {
             if (token.extensions && token.extensions.optimismBridgeAddress) {
                 optimismBridgeAddress = token.extensions.optimismBridgeAddress;
             }
-            TOKENS[NETWORKS['optimism']][token.address] = {
+            TOKENS[NETWORKS['optimism']][token.address] = new Token({
                 address: token.address,
                 name: token.name,
                 logo: token.logoURI || '',
@@ -146,7 +238,7 @@ const get = async <T>(url: string): Promise<T> => {
                     tokenAddress: '',
                     bridgeAddress: optimismBridgeAddress,
                 },
-            };
+            });
         });
     optimismTokenList
         .filter((token: any) => token.chainId == 1)
@@ -179,7 +271,7 @@ const get = async <T>(url: string): Promise<T> => {
     ).tokens;
 
     arbitrumTokenList.forEach((token: any) => {
-        TOKENS[NETWORKS['arbitrum']][token.address] = {
+        TOKENS[NETWORKS['arbitrum']][token.address] = new Token({
             address: token.address,
             name: token.name,
             logo: token.logoURI || '',
@@ -190,7 +282,7 @@ const get = async <T>(url: string): Promise<T> => {
                 tokenAddress: token.extensions.l1Address,
                 bridgeAddress: token.extensions.l1GatewayAddress,
             },
-        };
+        });
     });
 
     // tokens to exclude due to e.g. spam

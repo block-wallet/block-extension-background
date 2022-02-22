@@ -131,17 +131,17 @@ jobs:
       - name: Install background dependencies
         if: ${{ (steps.cache-background.outputs.cache-hit != 'true') || (github.event.inputs.cache == 'true') }}
         run: cd packages/background/ && yarn install --cache-folder .background-cache
+        env:
+          GITHUB_TOKEN: ${{ secrets.PAT }}
 
       - name: Install provider dependencies
         if: ${{ (steps.cache-provider.outputs.cache-hit != 'true') || (github.event.inputs.cache == 'true') }}
         run: cd packages/provider/ && yarn install --cache-folder .provider-cache
 
       - name: Build extension
-        run: make build
+        run: ENVIRONMENT=prod make build
         env:
           CI: false
-          INFURA_PROJECT_ID: ${{ secrets.INFURA_PROJECT_ID }}
-          ETHERSCAN_API_KEY: ${{ secrets.ETHERSCAN_API_KEY }}
 
       - name: Zip build
         run: zip -r -D ${{ steps.zip.outputs.name }} dist/

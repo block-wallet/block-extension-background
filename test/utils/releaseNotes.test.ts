@@ -65,7 +65,7 @@ const RELEASE_NOTES = [
     },
 ] as ReleaseNote[];
 
-describe.only('Release notes', () => {
+describe('Release notes', () => {
     it('should generate an empty changelog from empty release notes', () => {
         expect(generateReleaseNotesNews([], '1.0.0')).to.deep.equal([]);
     });

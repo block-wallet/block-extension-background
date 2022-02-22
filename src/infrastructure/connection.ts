@@ -1,12 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import {
-    BackgroundActions,
     ExtensionInstances,
-    Messages,
     Origin,
     ProviderInstances,
-    TransportResponseMessage,
 } from '../utils/types/communication';
+import { closeExtensionInstance } from '../utils/popup';
 import { v4 as uuid } from 'uuid';
 import BlankController from '../controllers/BlankController';
 import log from 'loglevel';
@@ -24,17 +22,13 @@ export const setupConnection = (
     port: chrome.runtime.Port,
     blankController: BlankController
 ): void => {
-    // Port id
+    // Validate origin
+    if (port.name !== Origin.EXTENSION && port.name !== Origin.PROVIDER) {
+        throw new Error('Unknown connection origin');
+    }
+
     const id = uuid();
 
-    // New message listener
-    const messageListener = (message: any, port: chrome.runtime.Port) => {
-        blankController.handler(message, port, id);
-    };
-
-    port.onMessage.addListener(messageListener);
-
-    // Handle new connection
     if (port.name === Origin.EXTENSION) {
         log.debug('New instance URL', port.sender?.url);
         // Close any other open instance
@@ -45,9 +39,7 @@ export const setupConnection = (
                     'tab.html'
                 )
             ) {
-                extensionInstances[instance].port.postMessage({
-                    id: BackgroundActions.CLOSE_WINDOW,
-                } as TransportResponseMessage<typeof Messages.BACKGROUND.ACTION>);
+                closeExtensionInstance(instance);
             }
         }
 
@@ -55,28 +47,36 @@ export const setupConnection = (
 
         log.debug('Extension instance connected', id);
     } else {
-        const tabId = port.sender?.tab?.id;
-
-        if (port.name === Origin.PROVIDER) {
-            if (!tabId || !port.sender?.url) {
-                throw new Error('Error initializing provider');
-            }
-
-            const url = new URL(port.sender.url);
-
-            providerInstances[id] = {
-                port,
-                tabId,
-                origin: url.origin,
-                siteMetadata: {
-                    iconURL: null,
-                    name: url.hostname,
-                },
-            };
-
-            log.debug(url.origin, 'connected', id);
+        if (
+            !port.sender?.url ||
+            typeof port.sender.tab?.id !== 'number' ||
+            typeof port.sender.tab.windowId !== 'number'
+        ) {
+            throw new Error('Error initializing provider');
         }
+
+        const url = new URL(port.sender.url);
+
+        providerInstances[id] = {
+            port,
+            tabId: port.sender.tab.id,
+            windowId: port.sender.tab.windowId,
+            origin: url.origin,
+            siteMetadata: {
+                iconURL: null,
+                name: url.hostname,
+            },
+        };
+
+        log.debug(url.origin, 'connected', id);
     }
+
+    // Setup listeners
+    const messageListener = (message: any, port: chrome.runtime.Port) => {
+        blankController.handler(message, port, id);
+    };
+
+    port.onMessage.addListener(messageListener);
 
     port.onDisconnect.addListener((port: chrome.runtime.Port) => {
         // Check for error

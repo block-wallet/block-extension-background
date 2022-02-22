@@ -21,7 +21,7 @@ export default {
                 decimals: 18,
             },
             iconUrls: [
-                'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/fantom/info/logo.png',
+                'https://raw.githubusercontent.com/block-wallet/assets/master/blockchains/fantom/info/logo.png',
             ],
             isCustomNetwork: false,
             gasLowerCap: {

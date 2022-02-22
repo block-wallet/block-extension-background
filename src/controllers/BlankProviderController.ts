@@ -17,7 +17,6 @@ import {
     AddEthereumChainParameter,
     WatchAssetReq,
     DappRequestConfirmOptions,
-    WatchAssetConfirmParams,
     SubscriptionParams,
     SubscriptionType,
     Subscription,
@@ -27,23 +26,25 @@ import { v4 as uuid } from 'uuid';
 import { BaseController } from '../infrastructure/BaseController';
 import {
     ProviderEvents,
-    SiteMetadata,
     RequestArguments,
     ProviderSetupData,
     ChainChangedInfo,
     EthSubscription,
+    ProviderConnectInfo,
 } from '@blank/provider/types';
 import { isEmpty } from 'lodash';
 import AppStateController, {
     AppStateControllerMemState,
 } from './AppStateController';
-import NetworkController, { NetworkEvents } from './NetworkController';
+import NetworkController, {
+    NetworkControllerState,
+    NetworkEvents,
+} from './NetworkController';
 import { ethers } from 'ethers';
 import {
     ExternalEventSubscription,
     Handler,
     Handlers,
-    ProviderInstance,
 } from '../utils/types/communication';
 import {
     TransactionController,
@@ -52,8 +53,7 @@ import {
 import PermissionsController, {
     PermissionsControllerState,
 } from './PermissionsController';
-import { openPopup } from '../utils/popup';
-import { closeTab } from '../utils/window';
+import { closeExtensionInstance, openPopup } from '../utils/popup';
 import {
     extensionInstances,
     providerInstances,
@@ -80,6 +80,7 @@ import {
     validateLogSubscriptionRequest,
 } from '../utils/subscriptions';
 import { ActionIntervalController } from './block-updates/ActionIntervalController';
+import { focusWindow, switchToTab } from '../utils/window';
 
 export enum BlankProviderEvents {
     SUBSCRIPTION_UPDATE = 'SUBSCRIPTION_UPDATE',
@@ -87,6 +88,12 @@ export enum BlankProviderEvents {
 
 interface ActiveSubscriptions {
     [id: string]: Subscription;
+}
+
+interface LastRequest {
+    time: number;
+    tabId: number;
+    windowId: number;
 }
 
 export interface BlankProviderControllerState {
@@ -102,6 +109,8 @@ export default class BlankProviderController extends BaseController<BlankProvide
     private _unlockHandlers: Handler[];
     private _requestHandlers: Handlers;
     private _activeSubscriptions: ActiveSubscriptions;
+    private _isConnected: boolean;
+    private _lastRequest: LastRequest | null;
 
     constructor(
         private readonly _networkController: NetworkController,
@@ -119,6 +128,13 @@ export default class BlankProviderController extends BaseController<BlankProvide
         this._unlockHandlers = [];
         this._requestHandlers = {};
         this._activeSubscriptions = {};
+        this._isConnected = false;
+        this._lastRequest = null;
+
+        // Setup connection status
+        this._handleConnectionStatus(this._networkController.store.getState());
+
+        this._networkController.store.subscribe(this._handleConnectionStatus);
 
         // Network change updates
         this._networkController.on(
@@ -197,14 +213,14 @@ export default class BlankProviderController extends BaseController<BlankProvide
     public setupProvider = async (
         portId: string
     ): Promise<ProviderSetupData> => {
-        // Get provider instance data
-        if (!providerInstances[portId]) {
-            throw new Error(`No data has been found for provider ${portId}`);
+        const accounts = this._accountsRequest(portId);
+
+        if (!this._isConnected) {
+            return { accounts } as ProviderSetupData;
         }
 
         const chainId = await this._getChainId();
         const networkVersion = await this._getNetworkVersion();
-        const accounts = this._accountsRequest(providerInstances[portId]);
 
         return {
             accounts,
@@ -214,17 +230,11 @@ export default class BlankProviderController extends BaseController<BlankProvide
     };
 
     /**
-     * Updates site metadata
-     *
+     * Set icon url for the given provider instance port id
      */
-    public setMetadata = (siteMetadata: SiteMetadata, portId: string): void => {
-        // Get provider instance data
-        if (!providerInstances[portId]) {
-            throw new Error(`No data has been found for provider ${portId}`);
-        }
-
+    public setIcon = (iconURL: string, portId: string): void => {
         // Update site metadata
-        providerInstances[portId].siteMetadata = siteMetadata;
+        providerInstances[portId].siteMetadata.iconURL = iconURL;
     };
 
     /**
@@ -235,26 +245,25 @@ export default class BlankProviderController extends BaseController<BlankProvide
         portId: string,
         eventData: ExternalEventSubscription
     ): ExternalEventSubscription => {
-        // Get provider instance data
-        if (!providerInstances[portId]) {
-            throw new Error(`No data has been found for provider ${portId}`);
-        }
-
-        eventData.payload = this._accountsRequest(providerInstances[portId]);
+        eventData.payload = this._accountsRequest(portId);
 
         return eventData;
     };
 
     /**
-     * It rejects all the pending transactions DApp requests
-     * of type `SIGNING` or `ASSET`
+     * It rejects all pending DApp requests
+     *
+     * @param ignoreSwitchNetwork If true switch network requests won't be cancelled
      */
-    public cancelPendingDAppRequests(): void {
+    public cancelPendingDAppRequests(ignoreSwitchNetwork = false): void {
         // Get active requests
         const requests = { ...this.store.getState().dappRequests };
 
         for (const [id, handler] of Object.entries(requests)) {
-            if (handler.type !== DappReq.SWITCH_NETWORK) {
+            if (
+                !ignoreSwitchNetwork ||
+                handler.type !== DappReq.SWITCH_NETWORK
+            ) {
                 this._requestHandlers[id].reject(
                     new Error(ProviderError.USER_REJECTED_REQUEST)
                 );
@@ -270,6 +279,17 @@ export default class BlankProviderController extends BaseController<BlankProvide
         });
     }
 
+    /**
+     * Reject all unlock awaits
+     */
+    public rejectUnlocks = (): void => {
+        this._unlockHandlers.forEach((handler) => {
+            handler.reject(new Error(ProviderError.USER_REJECTED_REQUEST));
+        });
+
+        this._unlockHandlers = [];
+    };
+
     //=============================================================================
     // ETHEREUM METHODS
     //=============================================================================
@@ -277,7 +297,7 @@ export default class BlankProviderController extends BaseController<BlankProvide
     /**
      * Ethereum requests handler
      *
-     * @param portId Port id
+     * @param portId Request origin port id
      * @param method String name of the method requested from external source
      * @param params Parameters passed to the method called from external source
      */
@@ -285,10 +305,7 @@ export default class BlankProviderController extends BaseController<BlankProvide
         portId: string,
         { method, params }: RequestArguments
     ): Promise<unknown> => {
-        // Get provider instance data
-        const instanceData = providerInstances[portId];
-
-        if (!instanceData) {
+        if (!providerInstances[portId]) {
             log.error(`No data has been found for provider ${portId}`);
             throw new Error(ProviderError.UNAUTHORIZED);
         }
@@ -297,7 +314,7 @@ export default class BlankProviderController extends BaseController<BlankProvide
             case JSONRPCMethod.eth_blockNumber:
                 return this._blockUpdatesController.getBlockNumber();
             case JSONRPCMethod.eth_accounts:
-                return this._accountsRequest(instanceData, true);
+                return this._accountsRequest(portId, true);
             case JSONRPCMethod.eth_chainId:
                 return this._getChainId();
             case JSONRPCMethod.eth_getCode:
@@ -317,11 +334,11 @@ export default class BlankProviderController extends BaseController<BlankProvide
                     .getProvider()
                     .send(method, params as unknown[]);
             case JSONRPCMethod.eth_requestAccounts:
-                return this._connectionRequest(instanceData);
+                return this._connectionRequest(portId);
             case JSONRPCMethod.eth_sendTransaction:
                 return this._handleSendTransaction(
                     params as [TransactionRequest],
-                    instanceData
+                    portId
                 );
             case JSONRPCMethod.eth_signTypedData:
             case JSONRPCMethod.eth_signTypedData_v1:
@@ -331,7 +348,7 @@ export default class BlankProviderController extends BaseController<BlankProvide
                 return this._handleMessageSigning(
                     method,
                     params as RawSignatureData[SignatureTypes],
-                    instanceData
+                    portId
                 );
             case JSONRPCMethod.eth_subscribe:
                 return this._createSubscription(
@@ -343,24 +360,24 @@ export default class BlankProviderController extends BaseController<BlankProvide
             case JSONRPCMethod.wallet_addEthereumChain:
                 return this._handleAddEthereumChain(
                     params as [AddEthereumChainParameter],
-                    instanceData
+                    portId
                 );
             case JSONRPCMethod.wallet_getPermissions:
-                return this._handleGetPermissions(instanceData);
+                return this._handleGetPermissions(portId);
             case JSONRPCMethod.wallet_requestPermissions:
                 return this._handleWalletRequestPermissions(
                     params as Record<string, unknown>[],
-                    instanceData
+                    portId
                 );
             case JSONRPCMethod.wallet_switchEthereumChain:
                 return this._handleSwitchEthereumChain(
                     params as [SwitchEthereumChainParameters],
-                    instanceData
+                    portId
                 );
             case JSONRPCMethod.wallet_watchAsset:
                 return this._handleWalletWatchAsset(
                     params as unknown as WatchAssetParameters,
-                    instanceData
+                    portId
                 );
             case JSONRPCMethod.web3_sha3:
                 return this._sha3(params);
@@ -380,17 +397,18 @@ export default class BlankProviderController extends BaseController<BlankProvide
     /**
      * Internal method to handle external method eth_sendTransaction
      *
-     * @param request - Object with transaction data (TransactionRequest)
-     * @param id - id of the active provider (needed to fetch origin of the request)
+     * @param params - Object with transaction data (TransactionRequest)
+     * @param portId Request origin port id
      */
     private _handleSendTransaction = async (
         params: [TransactionRequest],
-        { origin }: ProviderInstance
+        portId: string
     ): Promise<string> => {
-        const { result } = await this._transactionController.addTransaction(
-            params[0],
-            origin
-        );
+        const { result } = await this._transactionController.addTransaction({
+            transaction: params[0],
+            origin: providerInstances[portId].origin,
+            originId: portId,
+        });
 
         return result;
     };
@@ -414,7 +432,7 @@ export default class BlankProviderController extends BaseController<BlankProvide
     };
 
     /**
-     * Returns current provider chain id
+     * Returns network stored chain id
      */
     private _getChainId = async (): Promise<string> => {
         // We must use network stored chainId due to security implications.
@@ -425,7 +443,7 @@ export default class BlankProviderController extends BaseController<BlankProvide
     };
 
     /**
-     * Returns the current network version
+     * Returns network stored network version
      */
     private _getNetworkVersion = async (): Promise<string> => {
         const { networkVersion } = this._networkController.network;
@@ -593,14 +611,11 @@ export default class BlankProviderController extends BaseController<BlankProvide
     /**
      * Internal method to handle eth_requestAccounts
      *
+     * @param portId Request origin port id
      */
-    private _connectionRequest = async ({
-        origin,
-        siteMetadata,
-    }: ProviderInstance): Promise<string[]> => {
+    private _connectionRequest = async (portId: string): Promise<string[]> => {
         const permissions = await this._permissionsController.connectionRequest(
-            origin,
-            siteMetadata
+            portId
         );
 
         // Trigger unlock before returning accounts
@@ -620,18 +635,12 @@ export default class BlankProviderController extends BaseController<BlankProvide
     /**
      * Get accounts with permissions to interact with the given provider instance origin.
      *
-     * @param providerInstance Current provider instance data.
+     * @param portId Request origin port id
      * @param emitUpdate If true the accounts change event will be emitted.
      */
-    private _accountsRequest = (
-        { origin }: ProviderInstance,
-        emitUpdate = false
-    ) => {
-        // Check if app is locked
-        const isAppUnlocked =
-            this._appStateController.UIStore.getState().isAppUnlocked;
-
-        if (!isAppUnlocked) {
+    private _accountsRequest = (portId: string, emitUpdate = false) => {
+        // Return empty array if app is locked
+        if (!this._appStateController.UIStore.getState().isAppUnlocked) {
             return [];
         }
 
@@ -639,25 +648,25 @@ export default class BlankProviderController extends BaseController<BlankProvide
             this._emitAccountsChanged();
         }
 
-        return this._permissionsController.getAccounts(origin);
+        return this._permissionsController.getAccounts(
+            providerInstances[portId].origin
+        );
     };
 
     /**
      * Returns permissions granted with EIP-2255 standard
      *
+     * @param params Request params
+     * @param portId Request origin port id
      */
     private _handleWalletRequestPermissions = (
         params: Record<string, unknown>[],
-        instanceData: ProviderInstance
+        portId: string
     ) => {
-        if (!params) {
-            return;
-        }
-
         // We only grant permissions for the eth_accounts method
         // We only check on the first element of the array
-        if (JSONRPCMethod.eth_accounts in params[0]) {
-            return this._connectionRequest(instanceData);
+        if (params && JSONRPCMethod.eth_accounts in params[0]) {
+            return this._connectionRequest(portId);
         }
     };
 
@@ -665,9 +674,10 @@ export default class BlankProviderController extends BaseController<BlankProvide
      * Handles permission request for wallet_getPermissions method
      * EIP-2255
      *
+     * @param portId Request origin port id
      */
-    private _handleGetPermissions = (providerInstance: ProviderInstance) => {
-        const accounts = this._accountsRequest(providerInstance, true);
+    private _handleGetPermissions = (portId: string) => {
+        const accounts = this._accountsRequest(portId, true);
 
         if (accounts.length < 1) {
             return { invoker: origin };
@@ -695,9 +705,13 @@ export default class BlankProviderController extends BaseController<BlankProvide
     // DAPP REQUESTS
     //=============================================================================
 
+    /**
+     * Wallet add ethereum chain handler
+     * EIP-3085
+     */
     private _handleAddEthereumChain = async (
         params: [AddEthereumChainParameter],
-        instance: ProviderInstance
+        portId: string
     ) => {
         const data = params[0];
         if (!data) return;
@@ -713,24 +727,27 @@ export default class BlankProviderController extends BaseController<BlankProvide
         // We must check whether the network is known to us first.
         if (network && network.enable) {
             // If known, call handleSwitchEthereumChain
-            await this._handleSwitchEthereumChain([{ chainId }], instance);
+            await this._handleSwitchEthereumChain([{ chainId }], portId);
         } else {
             // TODO: Implement add network logic
             throw new Error(ProviderError.UNSUPPORTED_METHOD);
         }
     };
 
+    /**
+     * Wallet switch ethereum chain handler
+     * EIP-3326
+     */
     private _handleSwitchEthereumChain = async (
         params: [SwitchEthereumChainParameters],
-        instance: ProviderInstance
+        portId: string
     ) => {
+        const { origin } = providerInstances[portId];
+
         // Throw if there's already a request to switch networks from that origin
         const currentRequests = { ...this.store.getState().dappRequests };
         Object.values(currentRequests).forEach((req) => {
-            if (
-                req.type === DappReq.SWITCH_NETWORK &&
-                req.origin === instance.origin
-            ) {
+            if (req.type === DappReq.SWITCH_NETWORK && req.origin === origin) {
                 throw new Error(ProviderError.RESOURCE_UNAVAILABLE);
             }
         });
@@ -759,8 +776,7 @@ export default class BlankProviderController extends BaseController<BlankProvide
         const { isAccepted, reqId, callback } = await this._submitDappRequest(
             DappReq.SWITCH_NETWORK,
             { chainId: normalizedChainId },
-            instance.origin,
-            instance.siteMetadata
+            portId
         );
 
         try {
@@ -780,7 +796,7 @@ export default class BlankProviderController extends BaseController<BlankProvide
                 }
 
                 // Cancel pending DApp requests
-                this.cancelPendingDAppRequests();
+                this.cancelPendingDAppRequests(true);
 
                 // By EIP-3326, the method MUST return null if the request was successful
                 return null;
@@ -796,13 +812,19 @@ export default class BlankProviderController extends BaseController<BlankProvide
         }
     };
 
+    /**
+     * Typed structured data hashing and signing
+     * EIP-712
+     */
     private _handleMessageSigning = async <
         TSignatureType extends SignatureTypes
     >(
         method: TSignatureType,
         params: RawSignatureData[TSignatureType],
-        instance: ProviderInstance
+        portId: string
     ) => {
+        const { origin } = providerInstances[portId];
+
         // Get chain id
         const chainId = await this._getChainId();
 
@@ -811,7 +833,7 @@ export default class BlankProviderController extends BaseController<BlankProvide
 
         // Check if the account has permissions
         const hasPermission = this._permissionsController.accountHasPermissions(
-            instance.origin,
+            origin,
             normalizedParams.address
         );
         if (!hasPermission) {
@@ -823,8 +845,7 @@ export default class BlankProviderController extends BaseController<BlankProvide
         const { isAccepted, reqId, callback } = await this._submitDappRequest(
             DappReq.SIGNING,
             { method, params: normalizedParams },
-            instance.origin,
-            instance.siteMetadata
+            portId
         );
 
         try {
@@ -863,11 +884,12 @@ export default class BlankProviderController extends BaseController<BlankProvide
     };
 
     /**
-     * EIP-747 wallet_watchAsset handle
+     * Wallet watch asset (new asset tracking)
+     * EIP-747
      */
     private _handleWalletWatchAsset = async (
         params: WatchAssetParameters,
-        instance: ProviderInstance
+        portId: string
     ): Promise<boolean> => {
         const { chainId } = this._networkController.network;
         let isUpdate = false;
@@ -896,7 +918,9 @@ export default class BlankProviderController extends BaseController<BlankProvide
 
         // Get active account (if any)
         const activeAccount: string | undefined =
-            this._permissionsController.getAccounts(instance.origin)[0];
+            this._permissionsController.getAccounts(
+                providerInstances[portId].origin
+            )[0];
 
         // Check if token already exists on user profile
         const tokenSearchResult = (
@@ -923,8 +947,7 @@ export default class BlankProviderController extends BaseController<BlankProvide
             await this._submitDappRequest(
                 DappReq.ASSET,
                 { params: validParams, activeAccount, isUpdate, savedToken },
-                instance.origin,
-                instance.siteMetadata
+                portId
             );
 
         try {
@@ -963,24 +986,24 @@ export default class BlankProviderController extends BaseController<BlankProvide
      *
      * @param type Request type
      * @param params Request parameters
-     * @param origin Request origin
-     * @param siteMetadata Dapp Metadata
+     * @param originId Provider instance id
      */
     private _submitDappRequest = async <RequestType extends DappRequestType>(
         type: RequestType,
         params: DappRequestParams[RequestType],
-        origin: string,
-        siteMetadata: SiteMetadata
+        originId: string
     ): Promise<{
         isAccepted: boolean;
         reqId: string;
         confirmOptions?: DappRequestConfirmOptions;
         callback: {
             resolve: (value: void | PromiseLike<void>) => void;
-            reject: (reason?: any) => void;
+            reject: (reason?: unknown) => void;
         };
     }> => {
         return new Promise((resolve, reject): void => {
+            const { origin, siteMetadata } = providerInstances[originId];
+
             // Get current requests
             const requests = { ...this.store.getState().dappRequests };
 
@@ -992,8 +1015,9 @@ export default class BlankProviderController extends BaseController<BlankProvide
                 type,
                 params,
                 origin,
+                originId,
                 siteMetadata,
-                time: new Date().getTime(),
+                time: Date.now(),
             };
 
             this.store.updateState({
@@ -1085,6 +1109,25 @@ export default class BlankProviderController extends BaseController<BlankProvide
     };
 
     /**
+     * Internal method to emit connection updates
+     */
+    private _emitConnectionUpdate = async () => {
+        if (this._isConnected === true) {
+            const chainId = await this._getChainId();
+
+            this._updateEventSubscriptions({
+                eventName: ProviderEvents.connect,
+                payload: { chainId } as ProviderConnectInfo,
+            });
+        } else {
+            this._updateEventSubscriptions({
+                eventName: ProviderEvents.disconnect,
+                payload: undefined,
+            });
+        }
+    };
+
+    /**
      * Internal method to emit message event (for subscriptions)
      *
      * @param portId to which port is this message directed
@@ -1115,7 +1158,6 @@ export default class BlankProviderController extends BaseController<BlankProvide
 
     /**
      * Handles state updates for management of extension instances opened in windows
-     *
      */
     private _stateWatcher: {
         [req in WindowRequest]: (args: WindowRequestArguments[req]) => void;
@@ -1123,6 +1165,7 @@ export default class BlankProviderController extends BaseController<BlankProvide
         DAPP: ({ dappRequests }: BlankProviderControllerState) => {
             if (!isEmpty(dappRequests)) {
                 openPopup();
+                this._checkLastRequest(dappRequests);
             } else {
                 this._checkWindows();
             }
@@ -1149,6 +1192,7 @@ export default class BlankProviderController extends BaseController<BlankProvide
         PERMISSIONS: ({ permissionRequests }: PermissionsControllerState) => {
             if (!isEmpty(permissionRequests)) {
                 openPopup();
+                this._checkLastRequest(permissionRequests);
             } else {
                 this._checkWindows();
             }
@@ -1161,6 +1205,9 @@ export default class BlankProviderController extends BaseController<BlankProvide
         ) => {
             if (!isEmpty(transactionsState.unapprovedTransactions)) {
                 openPopup();
+                this._checkLastRequest(
+                    transactionsState.unapprovedTransactions
+                );
             } else {
                 this._checkWindows();
             }
@@ -1168,12 +1215,23 @@ export default class BlankProviderController extends BaseController<BlankProvide
     };
 
     /**
-     * Checks if there is any open window and
-     * closes it if there is no pending request
-     *
+     * It closes any open window if there are no pending requests and focuses
+     * the last request window
      */
-    private _checkWindows = () => {
-        let tabId: number | null = null;
+    private _checkWindows = async () => {
+        const { unapprovedTransactions } =
+            this._transactionController.UIStore.getState();
+        const { permissionRequests } =
+            this._permissionsController.store.getState();
+
+        if (
+            this._unlockHandlers.length > 0 ||
+            !isEmpty(this._requestHandlers) ||
+            !isEmpty(unapprovedTransactions) ||
+            !isEmpty(permissionRequests)
+        ) {
+            return;
+        }
 
         for (const instance in extensionInstances) {
             const instanceTabId =
@@ -1187,39 +1245,27 @@ export default class BlankProviderController extends BaseController<BlankProvide
                     'tab.html'
                 )
             ) {
-                tabId = instanceTabId;
+                // Focus last request window
+                if (this._lastRequest) {
+                    try {
+                        await switchToTab(this._lastRequest.tabId);
+                        await focusWindow(this._lastRequest.windowId);
+                    } catch (error) {
+                        log.debug(`Couldn't focus tab - ${error}`);
+                    }
+
+                    this._lastRequest = null;
+                }
+
+                closeExtensionInstance(instance);
             }
         }
-
-        if (!tabId) {
-            return;
-        }
-
-        const unapprovedTransactions =
-            this._transactionController.UIStore.getState()
-                .unapprovedTransactions;
-        const permissionRequests =
-            this._permissionsController.store.getState().permissionRequests;
-
-        if (!isEmpty(unapprovedTransactions)) {
-            return;
-        }
-        if (!isEmpty(permissionRequests)) {
-            return;
-        }
-        if (!isEmpty(this._requestHandlers)) {
-            return;
-        }
-        if (this._unlockHandlers.length > 0) {
-            return;
-        }
-
-        closeTab(tabId);
     };
 
     /**
-     * Creates a new unlock handler and opens a new window
+     * Opens a new window if the app is locked
      *
+     * @returns A promise that resolves when the app is unlocked
      */
     private _waitForUnlock = (): Promise<boolean> => {
         return new Promise((resolve, reject) => {
@@ -1232,5 +1278,56 @@ export default class BlankProviderController extends BaseController<BlankProvide
 
             openPopup();
         });
+    };
+
+    /**
+     * Updates providers current connection status
+     */
+    private _handleConnectionStatus = ({
+        isProviderNetworkOnline,
+        isUserNetworkOnline,
+        isNetworkChanging,
+    }: NetworkControllerState) => {
+        const isConnected =
+            isProviderNetworkOnline &&
+            isUserNetworkOnline &&
+            !isNetworkChanging;
+
+        if (isConnected !== this._isConnected) {
+            this._isConnected = isConnected;
+            this._emitConnectionUpdate();
+        }
+    };
+
+    /**
+     * Compares timestamps of the given requests to the last request
+     * and updates if necessary.
+     */
+    private _checkLastRequest = (
+        requests:
+            | BlankProviderControllerState['dappRequests']
+            | PermissionsControllerState['permissionRequests']
+            | TransactionVolatileControllerState['unapprovedTransactions']
+    ) => {
+        for (const req in requests) {
+            const id = requests[req].originId;
+
+            if (!id) {
+                return;
+            }
+
+            if (
+                !this._lastRequest ||
+                requests[req].time > this._lastRequest.time
+            ) {
+                const { tabId, windowId } = providerInstances[id];
+
+                this._lastRequest = {
+                    time: requests[req].time,
+                    tabId,
+                    windowId,
+                };
+            }
+        }
     };
 }

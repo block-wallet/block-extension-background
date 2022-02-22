@@ -8,6 +8,7 @@ import { SiteMetadata } from '@blank/provider/types';
 import { v4 as uuid } from 'uuid';
 import { Handlers } from '../utils/types/communication';
 import { ProviderError } from '../utils/types/ethereum';
+import { providerInstances } from '../infrastructure/connection';
 
 export interface GetPermissionResponse {
     invoker: string;
@@ -26,6 +27,7 @@ export interface PermissionRequest {
     origin: string;
     siteMetadata: SiteMetadata;
     time: number;
+    originId: string;
 }
 
 export interface PermissionsControllerState {
@@ -58,22 +60,18 @@ export default class PermissionsController extends BaseController<PermissionsCon
     /**
      * Handles connection request
      *
-     * @param siteMetadata Site Metadata
+     * @param portId Request origin port id
      */
-    public connectionRequest = async (
-        origin: string,
-        siteMetadata: SiteMetadata
-    ): Promise<string[]> => {
+    public connectionRequest = async (portId: string): Promise<string[]> => {
+        const { origin, siteMetadata } = providerInstances[portId];
+
         const currentPermissions = this.getAccounts(origin);
 
         if (currentPermissions.length) {
             return currentPermissions;
         }
 
-        const sitePermissions = await this._submitPermissionRequest(
-            origin,
-            siteMetadata
-        );
+        const sitePermissions = await this._submitPermissionRequest(portId);
 
         if (!sitePermissions) {
             throw new Error(ProviderError.USER_REJECTED_REQUEST);
@@ -300,15 +298,35 @@ export default class PermissionsController extends BaseController<PermissionsCon
     };
 
     /**
+     * Rejects all pending permission requests
+     */
+    public rejectAllRequests = (): void => {
+        const handlers = this._handlers;
+
+        for (const handlerId in handlers) {
+            handlers[handlerId].reject(
+                new Error(ProviderError.USER_REJECTED_REQUEST)
+            );
+        }
+
+        this._handlers = {};
+
+        this.store.updateState({
+            permissionRequests: {},
+        });
+    };
+
+    /**
      * Submits a new permission request.
      * Throws if there is an existent one from the same origin
      *
      */
     private _submitPermissionRequest = async (
-        origin: string,
-        siteMetadata: SiteMetadata
+        portId: string
     ): Promise<string[] | null> => {
         return new Promise((resolve, reject): void => {
+            const { origin, siteMetadata } = providerInstances[portId];
+
             // Get current requests
             const requests = this.store.getState().permissionRequests;
 
@@ -323,7 +341,12 @@ export default class PermissionsController extends BaseController<PermissionsCon
             const id = uuid();
 
             // Add request to state
-            requests[id] = { origin, siteMetadata, time: new Date().getTime() };
+            requests[id] = {
+                origin,
+                siteMetadata,
+                time: Date.now(),
+                originId: portId,
+            };
 
             this.store.updateState({
                 permissionRequests: requests,

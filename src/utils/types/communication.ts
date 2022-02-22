@@ -40,6 +40,7 @@ import {
     UserSettings,
 } from '@blank/background/controllers/PreferencesController';
 import { TransactionFeeData } from '@blank/background/controllers/erc-20/transactions/SignedTransaction';
+import { Currency } from '../currency';
 
 enum ACCOUNT {
     CREATE = 'CREATE_ACCOUNT',
@@ -62,6 +63,7 @@ enum APP {
     OPEN_RESET = 'OPEN_RESET',
     SET_USER_SETTINGS = 'SET_USER_SETTINGS',
     UPDATE_POPUP_TAB = 'UPDATE_POPUP_TAB',
+    REJECT_UNCONFIRMED_REQUESTS = 'REJECT_UNCONFIRMED_REQUESTS',
 }
 
 enum BACKGROUND {
@@ -97,7 +99,7 @@ export enum EXTERNAL {
     EVENT_SUBSCRIPTION = 'EVENT_SUBSCRIPTION',
     REQUEST = 'EXTERNAL_REQUEST',
     SETUP_PROVIDER = 'SETUP_PROVIDER',
-    SET_METADATA = 'SET_METADATA',
+    SET_ICON = 'SET_ICON',
 }
 
 enum NETWORK {
@@ -154,6 +156,12 @@ enum WALLET {
     RESET = 'RESET',
     DISMISS_WELCOME_MESSAGE = 'DISMISS_WELCOME_MESSAGE',
     DISMISS_RELEASE_NOTES = 'DISMISS_RELEASE_NOTES',
+    TOGGLE_RELEASE_NOTES_SUBSCRIPTION = 'TOGGLE_RELEASE_NOTES_SUBSCRIPTION',
+    GENERATE_ANTI_PHISHING_IMAGE = 'GENERATE_ANTI_PHISHING_IMAGE',
+    UPDATE_ANTI_PHISHING_IMAGE = 'UPDATE_ANTI_PHISHING_IMAGE',
+    TOGGLE_ANTI_PHISHING_PROTECTION = 'TOGGLE_ANTI_PHISHING_PROTECTION',
+    SET_NATIVE_CURRENCY = 'SET_NATIVE_CURRENCY',
+    GET_VALID_CURRENCIES = 'GET_VALID_CURRENCIES',
 }
 
 enum TOKEN {
@@ -227,6 +235,7 @@ export interface RequestSignatures {
     [Messages.APP.OPEN_RESET]: [undefined, void];
     [Messages.APP.SET_USER_SETTINGS]: [RequestUserSettings, UserSettings];
     [Messages.APP.UPDATE_POPUP_TAB]: [RequestUpdatePopupTab, void];
+    [Messages.APP.REJECT_UNCONFIRMED_REQUESTS]: [undefined, void];
     [Messages.BACKGROUND.ACTION]: [];
     [Messages.BLANK.DEPOSIT]: [RequestBlankDeposit, string];
     [Messages.BLANK.ADD_NEW_DEPOSIT_TRANSACTION]: [
@@ -285,7 +294,7 @@ export interface RequestSignatures {
     [Messages.DAPP.CONFIRM_REQUEST]: [RequestConfirmDappRequest, void];
     [Messages.EXTERNAL.REQUEST]: [RequestExternalRequest, unknown];
     [Messages.EXTERNAL.SETUP_PROVIDER]: [undefined, ProviderSetupData];
-    [Messages.EXTERNAL.SET_METADATA]: [RequestSetMetadata, boolean];
+    [Messages.EXTERNAL.SET_ICON]: [RequestSetIcon, boolean];
     [Messages.NETWORK.CHANGE]: [RequestNetworkChange, boolean];
     [Messages.NETWORK.SET_SHOW_TEST_NETWORKS]: [
         RequestShowTestNetworks,
@@ -386,6 +395,31 @@ export interface RequestSignatures {
     ];
     [Messages.WALLET.DISMISS_WELCOME_MESSAGE]: [DismissMessage, boolean];
     [Messages.WALLET.DISMISS_RELEASE_NOTES]: [DismissMessage, boolean];
+    [Messages.WALLET.TOGGLE_RELEASE_NOTES_SUBSCRIPTION]: [
+        RequestToggleReleaseNotesSubscription,
+        void
+    ];
+
+    [Messages.WALLET.GENERATE_ANTI_PHISHING_IMAGE]: [
+        RequestAntiPhishingImage,
+        string
+    ];
+
+    [Messages.WALLET.UPDATE_ANTI_PHISHING_IMAGE]: [
+        RequestUpdateAntiPhishingImage,
+        void
+    ];
+
+    [Messages.WALLET.TOGGLE_ANTI_PHISHING_PROTECTION]: [
+        RequestToggleAntiPhishingProtection,
+        void
+    ];
+
+    [Messages.WALLET.SET_NATIVE_CURRENCY]: [RequestSetNativeCurrency, void];
+    [Messages.WALLET.GET_VALID_CURRENCIES]: [
+        RequestGetValidCurrencies,
+        Currency[]
+    ];
 }
 
 export type MessageTypes = keyof RequestSignatures;
@@ -448,8 +482,8 @@ export interface RequestConfirmDappRequest {
 
 export type RequestExternalRequest = RequestArguments;
 
-export interface RequestSetMetadata {
-    siteMetadata: SiteMetadata;
+export interface RequestSetIcon {
+    iconURL: string;
 }
 
 export interface RequestBlankDeposit {
@@ -747,6 +781,26 @@ export interface RequestExecuteSwap {
     swap: Swap;
 }
 
+export interface RequestAntiPhishingImage {}
+
+export interface RequestUpdateAntiPhishingImage {
+    antiPhishingImage: string;
+}
+
+export interface RequestToggleAntiPhishingProtection {
+    antiPhishingProtectionEnabeld: boolean;
+}
+
+export interface RequestSetNativeCurrency {
+    currencyCode: string;
+}
+
+export interface RequestGetValidCurrencies {}
+
+export interface RequestToggleReleaseNotesSubscription {
+    releaseNotesSubscriptionEnabled: boolean;
+}
+
 export interface RequestRejectTransaction {
     transactionId: string;
 }
@@ -851,6 +905,7 @@ export interface ProviderInstances {
 export interface ProviderInstance {
     port: chrome.runtime.Port;
     tabId: number;
+    windowId: number;
     origin: string;
     siteMetadata: SiteMetadata;
 }

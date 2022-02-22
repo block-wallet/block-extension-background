@@ -1,9 +1,13 @@
 import { toChecksumAddress } from 'ethereumjs-util';
 import { BaseController } from '../infrastructure/BaseController';
+import { v4 as createUuid } from 'uuid';
+import { generatePhishingPrevention } from 'phishing-prevention';
+
 export interface UserSettings {
     // Setting that indicates if a warning is shown when receiving a transaction from an address different from the selected one.
     hideAddressWarning: boolean;
     subscribedToReleaseaNotes: boolean;
+    useAntiPhishingProtection: boolean;
 }
 
 export interface Note {
@@ -34,6 +38,7 @@ export interface PreferencesControllerState {
     showTestNetworks: boolean;
     popupTab: PopupTabs;
     settings: UserSettings;
+    antiPhishingImage: string;
     showWelcomeMessage: boolean;
     releaseNotesSettings: ReleaseNotesSettings;
 }
@@ -147,6 +152,7 @@ export class PreferencesController extends BaseController<PreferencesControllerS
     public set popupTab(popupTab: PopupTabs) {
         this.store.updateState({ popupTab: popupTab });
     }
+
     /**
      * Gets user settings.
      */
@@ -164,9 +170,34 @@ export class PreferencesController extends BaseController<PreferencesControllerS
     }
 
     /**
+     * assignNewPhishingPreventionImage
+     *
+     * This function assigns an anti-phishing image to users profile.
+     */
+    public async assignNewPhishingPreventionImage(
+        phishingPreventionImage: string
+    ) {
+        this.antiPhishingImage = phishingPreventionImage;
+    }
+
+    /**
+     * Sets antiPhishingImage value
+     */
+    public set antiPhishingImage(base64Image: string) {
+        this.store.updateState({ antiPhishingImage: base64Image });
+    }
+
+    /**
+     * Gets antiPhishingImage value
+     */
+    public get antiPhishingImage() {
+        return this.store.getState().antiPhishingImage;
+    }
+
+    /**
      * Gets showWelcomeMessage value.
      */
-    public get showWelcomeMessage() {
+    public get showWelcomeMessage(): boolean {
         return this.store.getState().showWelcomeMessage;
     }
 
@@ -185,5 +216,29 @@ export class PreferencesController extends BaseController<PreferencesControllerS
 
     public get releaseNotesSettings() {
         return this.store.getState().releaseNotesSettings;
+    }
+
+    /**
+     * Updates the anti-phishing protection flag status in the store.
+     */
+    public updateAntiPhishingProtectionStatus(enabled: boolean) {
+        return this.store.updateState({
+            settings: {
+                ...this.settings,
+                useAntiPhishingProtection: enabled,
+            },
+        });
+    }
+
+    /**
+     * Updates the release notes subscription flag status in the store.
+     */
+    public updateReleseNotesSubscriptionStatus(enabled: boolean) {
+        return this.store.updateState({
+            settings: {
+                ...this.settings,
+                subscribedToReleaseaNotes: enabled,
+            },
+        });
     }
 }

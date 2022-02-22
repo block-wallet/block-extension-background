@@ -463,12 +463,12 @@ describe('Transactions Controller', () => {
 
         it('Should throw trying to add an invalid transaction', async () => {
             transactionController
-                .addTransaction(
-                    {
+                .addTransaction({
+                    transaction: {
                         from: '0x1',
                     },
-                    'blank'
-                )
+                    origin: 'blank',
+                })
                 .then(() => {
                     throw new Error('Expected addTransaction to throw');
                 })
@@ -479,14 +479,14 @@ describe('Transactions Controller', () => {
 
         it('Should throw trying to add a transaction due to invalid blank origin', async () => {
             return transactionController
-                .addTransaction(
-                    {
+                .addTransaction({
+                    transaction: {
                         from: mockedAccounts['goerli'][1].address,
                         to: mockedAccounts['goerli'][0].address,
                         value: BigNumber.from('1'),
                     },
-                    'blank'
-                )
+                    origin: 'blank',
+                })
                 .then(() => {
                     throw new Error('Expected addTransaction to throw');
                 })
@@ -503,14 +503,14 @@ describe('Transactions Controller', () => {
                 .returns(false);
 
             return transactionController
-                .addTransaction(
-                    {
+                .addTransaction({
+                    transaction: {
                         from: mockedAccounts['goerli'][1].address,
                         to: mockedAccounts['goerli'][0].address,
                         value: BigNumber.from('1'),
                     },
-                    'https://app.uniswap.org'
-                )
+                    origin: 'https://app.uniswap.org',
+                })
                 .then(() => {
                     throw new Error('Expected addTransaction to throw');
                 })
@@ -530,14 +530,14 @@ describe('Transactions Controller', () => {
             );
 
             const { transactionMeta } =
-                await transactionController.addTransaction(
-                    {
+                await transactionController.addTransaction({
+                    transaction: {
                         from: mockedAccounts['goerli'][0].address,
                         to: mockedAccounts['goerli'][1].address,
                         value: BigNumber.from('1'),
                     },
-                    'blank'
-                );
+                    origin: 'blank',
+                });
 
             const { transactions } = transactionController.store.getState();
             expect(transactions.length).to.be.equal(1);
@@ -566,14 +566,14 @@ describe('Transactions Controller', () => {
             );
 
             const { transactionMeta, result } =
-                await transactionController.addTransaction(
-                    {
+                await transactionController.addTransaction({
+                    transaction: {
                         from: mockedAccounts['goerli'][0].address,
                         to: mockedAccounts['goerli'][1].address,
                         value: BigNumber.from('1'),
                     },
-                    'blank'
-                );
+                    origin: 'blank',
+                });
 
             await transactionController.approveTransaction(transactionMeta.id);
             return result.then((hash) =>
@@ -603,14 +603,14 @@ describe('Transactions Controller', () => {
                 });
 
             const { transactionMeta, result } =
-                await transactionController.addTransaction(
-                    {
+                await transactionController.addTransaction({
+                    transaction: {
                         from: mockedAccounts['goerli'][0].address,
                         to: mockedAccounts['goerli'][1].address,
                         value: BigNumber.from('1'),
                     },
-                    'blank'
-                );
+                    origin: 'blank',
+                });
 
             try {
                 await transactionController.approveTransaction(
@@ -656,14 +656,14 @@ describe('Transactions Controller', () => {
             );
 
             const { transactionMeta, result } =
-                await transactionController.addTransaction(
-                    {
+                await transactionController.addTransaction({
+                    transaction: {
                         from: mockedAccounts['goerli'][0].address,
                         to: mockedAccounts['goerli'][1].address,
                         value: BigNumber.from('1'),
                     },
-                    'blank'
-                );
+                    origin: 'blank',
+                });
 
             try {
                 await transactionController.approveTransaction(
@@ -710,14 +710,14 @@ describe('Transactions Controller', () => {
                 });
 
             const { transactionMeta, result } =
-                await transactionController.addTransaction(
-                    {
+                await transactionController.addTransaction({
+                    transaction: {
                         from: mockedAccounts['goerli'][0].address,
                         to: mockedAccounts['goerli'][1].address,
                         value: BigNumber.from('1'),
                     },
-                    'blank'
-                );
+                    origin: 'blank',
+                });
 
             try {
                 await transactionController.approveTransaction(
@@ -751,14 +751,14 @@ describe('Transactions Controller', () => {
             );
 
             const { transactionMeta, result } =
-                await transactionController.addTransaction(
-                    {
+                await transactionController.addTransaction({
+                    transaction: {
                         from: mockedAccounts['goerli'][0].address,
                         to: mockedAccounts['goerli'][1].address,
                         value: BigNumber.from('1'),
                     },
-                    'blank'
-                );
+                    origin: 'blank',
+                });
 
             expect(
                 transactionController.store.getState().transactions.length
@@ -789,23 +789,23 @@ describe('Transactions Controller', () => {
                 })
             );
 
-            await transactionController.addTransaction(
-                {
+            await transactionController.addTransaction({
+                transaction: {
                     from: mockedAccounts['goerli'][0].address,
                     to: mockedAccounts['goerli'][1].address,
                     value: BigNumber.from('1'),
                 },
-                'blank'
-            );
+                origin: 'blank',
+            });
 
-            await transactionController.addTransaction(
-                {
+            await transactionController.addTransaction({
+                transaction: {
                     from: mockedAccounts['goerli'][0].address,
                     to: mockedAccounts['goerli'][1].address,
                     value: BigNumber.from('1'),
                 },
-                'blank'
-            );
+                origin: 'blank',
+            });
 
             expect(
                 transactionController.store.getState().transactions.length
@@ -826,23 +826,23 @@ describe('Transactions Controller', () => {
                 })
             );
 
-            await transactionController.addTransaction(
-                {
+            await transactionController.addTransaction({
+                transaction: {
                     from: mockedAccounts['goerli'][0].address,
                     to: mockedAccounts['goerli'][1].address,
                     value: BigNumber.from('1'),
                 },
-                'blank'
-            );
+                origin: 'blank',
+            });
 
-            await transactionController.addTransaction(
-                {
+            await transactionController.addTransaction({
+                transaction: {
                     from: mockedAccounts['goerli'][0].address,
                     to: mockedAccounts['goerli'][1].address,
                     value: BigNumber.from('1'),
                 },
-                'blank'
-            );
+                origin: 'blank',
+            });
 
             transactionController.store.updateState({
                 transactions: [
@@ -881,23 +881,18 @@ describe('Transactions Controller', () => {
                 time: 1,
                 blocksDropCount: 1,
                 transactionParams: {
-                    to: '',
+                    from: '0xAb5801a7D398351b8bE11C439e05C5B3259aeC9B', // EOA
                     data: '0x64b07f210000000000000000000000000000000000000000000000000000000000000001',
                 },
                 metaType: MetaType.REGULAR,
                 loadingGasValues: false,
             };
 
-            let transactionCategory;
-
-            transactionCategory =
-                await transactionController.determineTransactionCategory(
-                    transactionMeta
-                );
-
-            expect(transactionCategory!.transactionCategory).to.be.equal(
-                TransactionCategories.CONTRACT_DEPLOYMENT
-            );
+            expect(
+                transactionController.resolveTransactionCategory(
+                    transactionMeta.transactionParams.data
+                )
+            ).to.be.equal(TransactionCategories.CONTRACT_DEPLOYMENT);
 
             transactionMeta = {
                 ...transactionMeta,
@@ -907,14 +902,18 @@ describe('Transactions Controller', () => {
                 },
             };
 
-            transactionCategory =
-                await transactionController.determineTransactionCategory(
-                    transactionMeta
-                );
+            transactionController.store.updateState({
+                transactions: [transactionMeta],
+            });
 
-            expect(transactionCategory!.transactionCategory).to.be.equal(
-                TransactionCategories.SENT_ETHER
+            await transactionController.setTransactionCategory(
+                transactionMeta.id
             );
+
+            expect(
+                transactionController.store.getState().transactions[0]
+                    .transactionCategory
+            ).to.be.equal(TransactionCategories.SENT_ETHER);
 
             mockedProvider.restore();
             mockedProvider = sinon
@@ -933,18 +932,25 @@ describe('Transactions Controller', () => {
                 },
             };
 
-            transactionCategory =
-                await transactionController.determineTransactionCategory(
-                    transactionMeta
-                );
+            transactionController.store.updateState({
+                transactions: [transactionMeta],
+            });
 
-            let methodSignature =
-                await transactionController.getMethodSignature('0xac9650d8');
-
-            expect(transactionCategory!.transactionCategory).to.be.equal(
-                TransactionCategories.CONTRACT_INTERACTION
+            await transactionController.setTransactionCategory(
+                transactionMeta.id
             );
-            expect(methodSignature?.name).to.be.equal('Multicall');
+
+            expect(
+                transactionController.store.getState().transactions[0]
+                    .transactionCategory
+            ).to.be.equal(TransactionCategories.CONTRACT_INTERACTION);
+
+            await transactionController.setMethodSignature(transactionMeta.id);
+
+            expect(
+                transactionController.store.getState().transactions[0]
+                    .methodSignature?.name
+            ).to.be.equal('Multicall');
         });
 
         it('Should add default EIP-1559 parameters values on a supported network correctly', async () => {
@@ -957,14 +963,14 @@ describe('Transactions Controller', () => {
 
             let {
                 transactionMeta: { transactionParams },
-            } = await transactionController.addTransaction(
-                {
+            } = await transactionController.addTransaction({
+                transaction: {
                     from: mockedAccounts.goerli[0].address,
                     to: mockedAccounts.goerli[1].address,
                     value: BigNumber.from('1'),
                 },
-                'blank'
-            );
+                origin: 'blank',
+            });
 
             expect(transactionParams.gasPrice).to.be.undefined;
             expect(transactionParams.maxFeePerGas).to.not.be.undefined;
@@ -999,16 +1005,16 @@ describe('Transactions Controller', () => {
                 });
 
             const { transactionMeta } =
-                await transactionController.addTransaction(
-                    {
+                await transactionController.addTransaction({
+                    transaction: {
                         from: mockedAccounts.goerli[0].address,
                         to: mockedAccounts.goerli[1].address,
                         value: BigNumber.from('1'),
                         maxFeePerGas: BigNumber.from('200000000000'),
                         maxPriorityFeePerGas: BigNumber.from('1000000000'),
                     },
-                    'blank'
-                );
+                    origin: 'blank',
+                });
 
             await transactionController.approveTransaction(transactionMeta.id);
 
@@ -1104,15 +1110,15 @@ describe('Transactions Controller', () => {
                 });
 
             const { transactionMeta } =
-                await transactionController.addTransaction(
-                    {
+                await transactionController.addTransaction({
+                    transaction: {
                         from: mockedAccounts.goerli[0].address,
                         to: mockedAccounts.goerli[1].address,
                         value: BigNumber.from('1'),
                         gasPrice: BigNumber.from('1000000000'),
                     },
-                    'blank'
-                );
+                    origin: 'blank',
+                });
 
             await transactionController.approveTransaction(transactionMeta.id);
 
@@ -1189,16 +1195,16 @@ describe('Transactions Controller', () => {
             );
 
             const { transactionMeta } =
-                await transactionController.addTransaction(
-                    {
+                await transactionController.addTransaction({
+                    transaction: {
                         from: mockedAccounts.goerli[0].address,
                         to: mockedAccounts.goerli[1].address,
                         value: BigNumber.from('1'),
                         maxFeePerGas: BigNumber.from('200000000000'),
                         maxPriorityFeePerGas: BigNumber.from('1000000000'),
                     },
-                    'blank'
-                );
+                    origin: 'blank',
+                });
 
             await transactionController.speedUpTransaction(transactionMeta.id);
 
@@ -1226,15 +1232,15 @@ describe('Transactions Controller', () => {
                 .returns(Promise.resolve(false));
 
             const { transactionMeta, result } =
-                await transactionController.addTransaction(
-                    {
+                await transactionController.addTransaction({
+                    transaction: {
                         from: mockedAccounts.goerli[0].address,
                         to: mockedAccounts.goerli[1].address,
                         value: BigNumber.from('1'),
                         gasPrice: BigNumber.from('1000000000'),
                     },
-                    'blank'
-                );
+                    origin: 'blank',
+                });
 
             await transactionController.speedUpTransaction(transactionMeta.id);
 
@@ -1502,16 +1508,16 @@ describe('Transactions Controller', () => {
             };
 
             const { transactionMeta } =
-                await transactionController.addTransaction(
-                    {
+                await transactionController.addTransaction({
+                    transaction: {
                         from: mockedAccounts.goerli[0].address,
                         to: mockedAccounts.goerli[1].address,
                         value: BigNumber.from('1'),
                         maxFeePerGas: BigNumber.from('200000000000'),
                         maxPriorityFeePerGas: BigNumber.from('1000000000'),
                     },
-                    'blank'
-                );
+                    origin: 'blank',
+                });
 
             await transactionController.speedUpTransaction(transactionMeta.id);
 
@@ -1532,28 +1538,28 @@ describe('Transactions Controller', () => {
             };
 
             const { transactionMeta } =
-                await transactionController.addTransaction(
-                    {
+                await transactionController.addTransaction({
+                    transaction: {
                         from: mockedAccounts.goerli[0].address,
                         to: mockedAccounts.goerli[1].address,
                         value: BigNumber.from('1'),
                         maxFeePerGas: BigNumber.from('200000000000'),
                         maxPriorityFeePerGas: BigNumber.from('1000000000'),
                     },
-                    'blank'
-                );
+                    origin: 'blank',
+                });
             await transactionController.approveTransaction(transactionMeta.id);
 
-            await transactionController.addTransaction(
-                {
+            await transactionController.addTransaction({
+                transaction: {
                     from: mockedAccounts.goerli[0].address,
                     to: mockedAccounts.goerli[1].address,
                     value: BigNumber.from('100'),
                     maxFeePerGas: BigNumber.from('200000000000'),
                     maxPriorityFeePerGas: BigNumber.from('1000000000'),
                 },
-                'blank'
-            );
+                origin: 'blank',
+            });
 
             const { transactions } = transactionController.store.getState();
             expect(transactions.length).to.be.equal(2);
@@ -1590,16 +1596,16 @@ describe('Transactions Controller', () => {
                 metaType: MetaType.REGULAR,
             } as TransactionMeta);
 
-            await transactionController.addTransaction(
-                {
+            await transactionController.addTransaction({
+                transaction: {
                     from: mockedAccounts.goerli[0].address,
                     to: mockedAccounts.goerli[1].address,
                     value: BigNumber.from('100'),
                     maxFeePerGas: BigNumber.from('200000000000'),
                     maxPriorityFeePerGas: BigNumber.from('1000000000'),
                 },
-                'blank'
-            );
+                origin: 'blank',
+            });
 
             const { transactions } = transactionController.store.getState();
             expect(transactions.length).to.be.equal(1);

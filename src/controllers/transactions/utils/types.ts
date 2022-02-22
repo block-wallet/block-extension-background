@@ -77,6 +77,7 @@ export interface TransactionMeta {
         message: string;
         stack?: string;
     };
+    originId?: string;
 }
 
 export interface uiTransactionParams extends TransactionParams {

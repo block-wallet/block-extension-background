@@ -9,6 +9,12 @@ import {
 import { extensionInstances } from '../infrastructure/connection';
 import { Mutex } from 'async-mutex';
 import { PlatformOS } from './types/platform';
+import {
+    BackgroundActions,
+    Messages,
+    TransportResponseMessage,
+} from './types/communication';
+import log from 'loglevel';
 
 // Define window size for each os
 const windowSize: { [os in PlatformOS]: { height: number; width: number } } = {
@@ -88,7 +94,11 @@ const openExtensionWindow = async () => {
     try {
         const win = await getLastFocusedWindow();
         // Position window in top right corner of lastFocused window.
-        if (win.top && win.left && win.width) {
+        if (
+            win.top !== undefined &&
+            win.left !== undefined &&
+            win.width !== undefined
+        ) {
             top = win.top;
             left = win.left + (win.width - width);
         }
@@ -121,5 +131,20 @@ const openExtensionWindow = async () => {
             left,
             top,
         });
+    }
+};
+
+/**
+ * Closes the given extension instance
+ *
+ * @param instanceId
+ */
+export const closeExtensionInstance = (instanceId: string): void => {
+    try {
+        extensionInstances[instanceId].port.postMessage({
+            id: BackgroundActions.CLOSE_WINDOW,
+        } as TransportResponseMessage<typeof Messages.BACKGROUND.ACTION>);
+    } catch (error) {
+        log.error(`Couldn't close instance ${instanceId}`);
     }
 };

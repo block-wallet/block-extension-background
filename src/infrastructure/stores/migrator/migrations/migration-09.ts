@@ -22,7 +22,7 @@ export default {
                 decimals: 18,
             },
             iconUrls: [
-                'https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/avalanchec/info/logo.png',
+                'https://raw.githubusercontent.com/block-wallet/assets/master/blockchains/avalanchec/info/logo.png',
             ],
             isCustomNetwork: false,
             gasLowerCap: {

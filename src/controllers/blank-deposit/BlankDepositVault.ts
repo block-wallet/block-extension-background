@@ -114,6 +114,24 @@ export class BlankDepositVault {
     }
 
     /**
+     * failReconstruction
+     *
+     * It transitions the current network reconstruction status to failed
+     */
+    public async failReconstruction(
+        chainId: number = this._networkController.network.chainId,
+        error = 'Error reconstructing deposits'
+    ) {
+        return this.setDepositsVault(
+            {
+                isLoading: false,
+                errorsInitializing: [error],
+            },
+            chainId
+        );
+    }
+
+    /**
      * Updates the current or specified deposit vault state
      *
      * @param chainVaultState The specified chain vault to update

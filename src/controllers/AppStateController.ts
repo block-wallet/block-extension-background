@@ -16,6 +16,7 @@ export default class AppStateController extends BaseController<
     AppStateControllerMemState
 > {
     private _timer: ReturnType<typeof setTimeout> | null;
+    private isLoadingDeposits = false;
 
     constructor(
         initState: AppStateControllerState,
@@ -27,6 +28,18 @@ export default class AppStateController extends BaseController<
         });
 
         this._timer = null;
+
+        this._blankDepositController.UIStore.subscribe(
+            ({ isImportingDeposits }) => {
+                if (this.isLoadingDeposits && !isImportingDeposits) {
+                    this._resetTimer();
+                }
+                this.isLoadingDeposits = isImportingDeposits;
+            }
+        );
+
+        this.isLoadingDeposits =
+            this._blankDepositController.UIStore.getState().isImportingDeposits;
 
         this._resetTimer();
     }
@@ -63,6 +76,11 @@ export default class AppStateController extends BaseController<
      * Locks the vault and the app
      */
     public lock = async (): Promise<void> => {
+        // Do not lock the app if we're loading the deposits
+        if (this.isLoadingDeposits) {
+            return;
+        }
+
         try {
             // Lock vault
             await this._keyringController.setLocked();

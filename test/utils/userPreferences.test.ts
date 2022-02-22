@@ -52,6 +52,7 @@ describe('userPreferences tests', () => {
                         settings: {
                             subscribedToReleaseaNotes: false,
                             hideAddressWarning: false,
+                            useAntiPhishingProtection: true,
                         },
                     },
                     '2.0.0'
@@ -70,6 +71,7 @@ describe('userPreferences tests', () => {
                         settings: {
                             subscribedToReleaseaNotes: true,
                             hideAddressWarning: false,
+                            useAntiPhishingProtection: true,
                         },
                         releaseNotesSettings: {
                             lastVersionUserSawNews: '2.0.0',
@@ -92,6 +94,7 @@ describe('userPreferences tests', () => {
                         settings: {
                             subscribedToReleaseaNotes: true,
                             hideAddressWarning: false,
+                            useAntiPhishingProtection: true,
                         },
                         releaseNotesSettings: {
                             lastVersionUserSawNews: '1.0.0',

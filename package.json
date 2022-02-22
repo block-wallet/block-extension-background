@@ -1,12 +1,12 @@
 {
     "name": "@blank/background",
-    "version": "0.1.23",
+    "version": "0.1.25",
     "private": true,
     "dependencies": {
         "@blank/explorer-link": "https://github.com/block-wallet/explorer-link",
         "@eth-optimism/tokenlist": "https://github.com/ethereum-optimism/ethereum-optimism.github.io",
         "@ethereumjs/tx": "^3.2.1",
-        "assets": "https://github.com/trustwallet/assets",
+        "assets": "https://github.com/block-wallet/assets",
         "async-mutex": "^0.3.2",
         "axios": "^0.21.1",
         "bip39": "^3.0.3",
@@ -24,6 +24,7 @@
         "idb": "^6.0.0",
         "lodash": "^4.17.21",
         "loglevel": "^1.7.1",
+        "phishing-prevention": "git+https://github.com/block-wallet/phishing-prevention#057cdfc0f622d0c7da3f0e60c236887f40bba181",
         "schema-validator": "git+https://github.com/block-wallet/schema-validator.git",
         "snarkjs": "git+https://github.com/block-wallet/snarkjs.git#4b9003c21f480149c2f21c14156efe6b6cafd8e0",
         "uuid": "^8.3.2",

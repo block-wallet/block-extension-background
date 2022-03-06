@@ -10,7 +10,10 @@ import { IBlankDeposit } from '../../controllers/blank-deposit/BlankDeposit';
 import { ComplianceInfo } from '../../controllers/blank-deposit/infrastructure/IBlankDepositService';
 import { BigNumber } from '@ethersproject/bignumber';
 import { AccountInfo } from '../../controllers/AccountTrackerController';
-import { GasPriceValue } from '../../controllers/transactions/TransactionController';
+import {
+    GasPriceValue,
+    FeeMarketEIP1559Values,
+} from '../../controllers/transactions/TransactionController';
 import { ITokens, Token } from '../../controllers/erc-20/Token';
 import {
     TransactionAdvancedData,
@@ -144,6 +147,8 @@ enum TRANSACTION {
     SEND_ETHER = 'SEND_ETHER',
     CANCEL_TRANSACTION = 'CANCEL_TRANSACTION',
     SPEED_UP_TRANSACTION = 'SPEED_UP_TRANSACTION',
+    GET_SPEED_UP_GAS_PRICE = 'GET_SPEED_UP_GAS_PRICE',
+    GET_CANCEL_GAS_PRICE = 'GET_CANCEL_GAS_PRICE',
     GET_NEXT_NONCE = 'GET_NEXT_NONCE',
 }
 
@@ -352,6 +357,14 @@ export interface RequestSignatures {
     [Messages.TRANSACTION.SPEED_UP_TRANSACTION]: [
         RequestSpeedUpTransaction,
         void
+    ];
+    [Messages.TRANSACTION.GET_SPEED_UP_GAS_PRICE]: [
+        RequestGetCancelSpeedUpGasPriceTransaction,
+        GasPriceValue | FeeMarketEIP1559Values
+    ];
+    [Messages.TRANSACTION.GET_CANCEL_GAS_PRICE]: [
+        RequestGetCancelSpeedUpGasPriceTransaction,
+        GasPriceValue | FeeMarketEIP1559Values
     ];
     [Messages.TRANSACTION.GET_NEXT_NONCE]: [RequestNextNonce, number];
     [Messages.WALLET.CREATE]: [RequestWalletCreate, void];
@@ -734,12 +747,18 @@ export interface RequestCalculateSendTransactionGasLimit {
 
 export interface RequestCancelTransaction {
     transactionId: string;
-    gasValues?: GasPriceValue;
+    gasValues?: GasPriceValue | FeeMarketEIP1559Values;
+    gasLimit?: BigNumber;
 }
 
 export interface RequestSpeedUpTransaction {
     transactionId: string;
-    gasValues?: GasPriceValue;
+    gasValues?: GasPriceValue | FeeMarketEIP1559Values;
+    gasLimit?: BigNumber;
+}
+
+export interface RequestGetCancelSpeedUpGasPriceTransaction {
+    transactionId: string;
 }
 
 export interface RequestCalculateApproveTransactionGasLimit {

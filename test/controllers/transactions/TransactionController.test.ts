@@ -417,6 +417,13 @@ describe('Transactions Controller', () => {
                     gasPriceData: {
                         5: {
                             isEIP1559Compatible: true,
+                            gasPricesLevels: {
+                                fast: {
+                                    gasPrice: BigNumber.from(12),
+                                    maxPriorityFeePerGas: BigNumber.from(12),
+                                    maxFeePerGas: BigNumber.from(12),
+                                },
+                            },
                         },
                     },
                 }),

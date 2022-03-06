@@ -1,6 +1,6 @@
 {
     "name": "@blank/background",
-    "version": "0.1.25",
+    "version": "0.1.27",
     "private": true,
     "dependencies": {
         "@blank/explorer-link": "https://github.com/block-wallet/explorer-link",

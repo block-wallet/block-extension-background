@@ -287,6 +287,10 @@ const get = async <T>(url: string): Promise<T> => {
 
     // tokens to exclude due to e.g. spam
     const excludedTokens = {
+        // ethereum mainnet
+        1: [
+            '0x0E69D0A2bbB30aBcB7e5CfEA0E4FDe19C00A8d47', // IOV
+        ],
         // bsc
         56: [
             '0x5CA42204cDaa70d5c773946e69dE942b85CA6706', // POSI

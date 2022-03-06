@@ -88,6 +88,7 @@ import type {
     RequestUserSettings,
     RequestCancelTransaction,
     RequestSpeedUpTransaction,
+    RequestGetCancelSpeedUpGasPriceTransaction,
     RequestNextNonce,
     RequestUpdateAntiPhishingImage,
     RequestToggleAntiPhishingProtection,
@@ -116,6 +117,9 @@ import { EnsController } from './EnsController';
 import TransactionController, {
     SEND_GAS_COST,
     TransactionGasEstimation,
+    SpeedUpCancel,
+    GasPriceValue,
+    FeeMarketEIP1559Values,
 } from './transactions/TransactionController';
 import { PreferencesController } from './PreferencesController';
 import { ExchangeRatesController } from './ExchangeRatesController';
@@ -808,6 +812,14 @@ export default class BlankController extends EventEmitter {
                 );
             case Messages.TRANSACTION.SPEED_UP_TRANSACTION:
                 return this.speedUpTransaction(
+                    request as RequestSpeedUpTransaction
+                );
+            case Messages.TRANSACTION.GET_SPEED_UP_GAS_PRICE:
+                return this.getSpeedUpGasPrice(
+                    request as RequestSpeedUpTransaction
+                );
+            case Messages.TRANSACTION.GET_CANCEL_GAS_PRICE:
+                return this.getCancelGasPrice(
                     request as RequestSpeedUpTransaction
                 );
             case Messages.TRANSACTION.GET_NEXT_NONCE:
@@ -1867,20 +1879,72 @@ export default class BlankController extends EventEmitter {
     private cancelTransaction({
         transactionId,
         gasValues,
+        gasLimit,
     }: RequestCancelTransaction): Promise<void> {
+        // Needed in order to make sure BigNumber are correctly passed
+        const values = {};
+
+        Object.keys(gasValues as any).forEach((key) => {
+            (values as any)[key] = BigNumber.from((gasValues as any)[key]);
+        });
+
         return this.transactionController.cancelTransaction(
             transactionId,
-            gasValues
+            values as GasPriceValue,
+            gasLimit ? BigNumber.from(gasLimit) : undefined
         );
     }
 
     private speedUpTransaction({
         transactionId,
         gasValues,
+        gasLimit,
     }: RequestSpeedUpTransaction): Promise<void> {
+        // Needed in order to make sure BigNumber are correctly passed
+        const values = {};
+
+        Object.keys(gasValues as any).forEach((key) => {
+            (values as any)[key] = BigNumber.from((gasValues as any)[key]);
+        });
+
         return this.transactionController.speedUpTransaction(
             transactionId,
-            gasValues
+            values as GasPriceValue,
+            gasLimit ? BigNumber.from(gasLimit) : undefined
+        );
+    }
+
+    private getCancelGasPrice({
+        transactionId,
+    }: RequestGetCancelSpeedUpGasPriceTransaction):
+        | GasPriceValue
+        | FeeMarketEIP1559Values {
+        const tx = this.transactionController.getTransaction(transactionId);
+
+        if (!tx)
+            throw new Error(
+                `Invalid transaction id, couldn't find the transaction with ${transactionId}`
+            );
+        return this.transactionController.getCancelSpeedUpMinGasPrice(
+            SpeedUpCancel.CANCEL,
+            tx
+        );
+    }
+
+    private getSpeedUpGasPrice({
+        transactionId,
+    }: RequestGetCancelSpeedUpGasPriceTransaction):
+        | GasPriceValue
+        | FeeMarketEIP1559Values {
+        const tx = this.transactionController.getTransaction(transactionId);
+
+        if (!tx)
+            throw new Error(
+                `Invalid transaction id, couldn't find the transaction with ${transactionId}`
+            );
+        return this.transactionController.getCancelSpeedUpMinGasPrice(
+            SpeedUpCancel.SPEED_UP,
+            tx
         );
     }
 
@@ -1892,15 +1956,23 @@ export default class BlankController extends EventEmitter {
         to,
         value,
     }: RequestCalculateSendTransactionGasLimit): Promise<TransactionGasEstimation> {
-        if (
-            this.tokenController.isNativeToken(address) &&
-            !this.networkController.network.isCustomNetwork
-        ) {
-            return {
-                gasLimit: BigNumber.from(SEND_GAS_COST),
-                estimationSucceeded: true,
-            };
-        } else if (this.tokenController.isNativeToken(address)) {
+
+        const isNativeToken = this.tokenController.isNativeToken(address)
+        const isCustomNetwork = this.networkController.network.isCustomNetwork
+        const isZeroValue = BigNumber.from(value).eq(BigNumber.from('0x00'))
+
+        if (isNativeToken) {
+
+            // Native Token and Not a custom network, returns SEND_GAS_COST const.
+            if (!isCustomNetwork) {
+                return {
+                    gasLimit: BigNumber.from(SEND_GAS_COST),
+                    estimationSucceeded: true,
+                };
+            }
+
+            // Native token of a custom network, estimets gas with fallback price.
+
             const { chainId } = this.networkController.network;
             return this.transactionController.estimateGas(
                 {
@@ -1913,15 +1985,19 @@ export default class BlankController extends EventEmitter {
                 //On L2 networks (Arbitrum for now), added fallback gas limit value to 1,200,000 to use in case estimation fails.
                 BigNumber.from('0x0c3500')
             );
-        } else {
-            const transferTransaction = this.getTransferTransaction();
 
-            return transferTransaction.calculateTransactionGasLimit({
-                tokenAddress: address,
-                to,
-                amount: value,
-            } as TransferTransactionPopulatedTransactionParams);
         }
+
+        // Not native token, calculate transaction's gas limit.
+        const transferTransaction = this.getTransferTransaction();
+
+        return transferTransaction.calculateTransactionGasLimit({
+            tokenAddress: address,
+            to,
+            amount: value,
+        } as TransferTransactionPopulatedTransactionParams,
+            isZeroValue);
+
     }
 
     private getTransferTransaction(): TransferTransaction {
@@ -2119,7 +2195,7 @@ export default class BlankController extends EventEmitter {
      * Method to mark setup process as complete and to fire a notification.
      *
      */
-    private async completeSetup({}: RequestCompleteSetup): Promise<void> {
+    private async completeSetup({ }: RequestCompleteSetup): Promise<void> {
         if (!this.isSetupComplete) {
             showSetUpCompleteNotification();
             this.isSetupComplete = true;
@@ -2428,7 +2504,7 @@ export default class BlankController extends EventEmitter {
      * Remove all entries in the book
      *
      */
-    private async addressBookClear({}: RequestAddressBookClear): Promise<boolean> {
+    private async addressBookClear({ }: RequestAddressBookClear): Promise<boolean> {
         return this.addressBookController.clear();
     }
 
@@ -2464,7 +2540,7 @@ export default class BlankController extends EventEmitter {
      *
      * @returns - A map with the entries
      */
-    private async addressBookGet({}: RequestAddressBookGet): Promise<NetworkAddressBook> {
+    private async addressBookGet({ }: RequestAddressBookGet): Promise<NetworkAddressBook> {
         return this.addressBookController.get();
     }
 

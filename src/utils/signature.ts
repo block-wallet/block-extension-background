@@ -12,10 +12,11 @@ import {
     NormalizedSignatureParams,
     RawSignatureData,
     SignatureParams,
-    SignatureTypes,
+    SignatureMethods,
     TypedMessage,
+    TypedSignatureMethods,
 } from './types/ethereum';
-import { hexValue, isHexString } from 'ethers/lib/utils';
+import { hexValue } from 'ethers/lib/utils';
 import schemaValidator from 'schema-validator';
 
 /**
@@ -23,11 +24,10 @@ import schemaValidator from 'schema-validator';
  *
  * @param method Signature method
  * @param params Raw signature params
- * @param permissions Permissions for the request's origin
  * @param chainId Current chain ID
  * @returns Normalized params
  */
-export const validateSignature = <TSignatureType extends SignatureTypes>(
+export const validateSignature = <TSignatureType extends SignatureMethods>(
     method: TSignatureType,
     params: RawSignatureData[TSignatureType],
     chainId: string
@@ -53,13 +53,29 @@ export const validateSignature = <TSignatureType extends SignatureTypes>(
     // Checksum address
     nParams.address = toChecksumAddress(nParams.address);
 
-    if (method === JSONRPCMethod.personal_sign) {
+    if (
+        method === JSONRPCMethod.eth_sign ||
+        method === JSONRPCMethod.personal_sign
+    ) {
         if (typeof nParams.data !== 'string') {
             throw new Error('Data should be a string');
         }
+
+        nParams.data = normalizeMessageData(nParams.data);
+
+        if (
+            method === JSONRPCMethod.eth_sign &&
+            nParams.data.length !== 66 &&
+            nParams.data.length !== 67
+        ) {
+            throw new Error('eth_sign requires a 32 byte message hash');
+        }
     } else {
         // Validate
-        const requestChainId = validateTypedData(method, nParams);
+        const requestChainId = validateTypedData(
+            method,
+            nParams as SignatureParams<TypedSignatureMethods>
+        );
 
         // Validate chain id
         if (requestChainId) {
@@ -79,27 +95,27 @@ export const validateSignature = <TSignatureType extends SignatureTypes>(
     return nParams as NormalizedSignatureParams<TSignatureType>;
 };
 
-const normalizeParams = <TSignatureType extends SignatureTypes>(
+const normalizeParams = <TSignatureType extends SignatureMethods>(
     method: TSignatureType,
     params: RawSignatureData[TSignatureType]
 ): SignatureParams<TSignatureType> => {
     if (
+        method === JSONRPCMethod.eth_sign ||
         method === JSONRPCMethod.eth_signTypedData_v3 ||
         method === JSONRPCMethod.eth_signTypedData_v4
     ) {
-        // params: [address, typedData]
+        // params: [address, data]
         return {
             address: params[0] as string,
             data: params[1],
         };
-    } else {
-        // Personal sign params: [data, address]
-        // V1 or legacy typed params: [address, typedData]
-        return {
-            address: params[1],
-            data: params[0],
-        };
     }
+
+    // params: [data, address]
+    return {
+        address: params[1],
+        data: params[0],
+    };
 };
 
 /**
@@ -108,9 +124,11 @@ const normalizeParams = <TSignatureType extends SignatureTypes>(
  *
  * @param params signature params
  */
-export const validateTypedData = <TSignatureType extends SignatureTypes>(
-    method: TSignatureType,
-    params: SignatureParams<TSignatureType>
+export const validateTypedData = <
+    TSignatureMethod extends TypedSignatureMethods
+>(
+    method: TSignatureMethod,
+    params: SignatureParams<TSignatureMethod>
 ): void | number => {
     if (
         method === JSONRPCMethod.eth_signTypedData ||
@@ -154,16 +172,14 @@ export const validateTypedData = <TSignatureType extends SignatureTypes>(
 };
 
 /**
- * Normalize personal message data
+ * Normalize message data
  *
  * @param data Message
  * @returns Hex string
  */
 export const normalizeMessageData = (data: string): string => {
-    const hexData = addHexPrefix(data);
-
-    if (isHexString(hexData)) {
-        return hexData;
+    if (data[0] === '0' && data[1] === 'x') {
+        return data;
     } else {
         return bufferToHex(Buffer.from(data, 'utf8'));
     }

@@ -91,7 +91,8 @@ export class TransferTransaction extends SignedTransaction {
      * }
      */
     public async populateTransaction(
-        populateTransasctionParams: TransferTransactionPopulatedTransactionParams
+        populateTransasctionParams: TransferTransactionPopulatedTransactionParams,
+        ignoreZeroValue = false
     ): Promise<ethers.PopulatedTransaction> {
         if (!populateTransasctionParams.tokenAddress) {
             throw tokenAddressParamNotPresentError;
@@ -100,8 +101,10 @@ export class TransferTransaction extends SignedTransaction {
             throw toParamNotPresentError;
         }
         if (
-            !populateTransasctionParams.amount ||
-            BigNumber.from(populateTransasctionParams.amount).lte('0')
+            !ignoreZeroValue &&
+            (
+                !populateTransasctionParams.amount ||
+                BigNumber.from(populateTransasctionParams.amount).lte('0'))
         ) {
             throw amountParamNotPresentError;
         }
@@ -124,10 +127,13 @@ export class TransferTransaction extends SignedTransaction {
      * }
      */
     public async calculateTransactionGasLimit(
-        populateTransasctionParams: TransferTransactionPopulatedTransactionParams
+        populateTransasctionParams: TransferTransactionPopulatedTransactionParams,
+        ignoreZeroValue = false
+
     ): Promise<TransactionGasEstimation> {
         const populatedTransaction = await this.populateTransaction(
-            populateTransasctionParams
+            populateTransasctionParams,
+            ignoreZeroValue
         );
 
         return this._calculateTransactionGasLimit(populatedTransaction);

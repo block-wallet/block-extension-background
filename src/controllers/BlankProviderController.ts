@@ -4,7 +4,7 @@ import {
     DappRequestType,
     JSONRPCMethod,
     ProviderError,
-    SignatureTypes,
+    SignatureMethods,
     TransactionRequest,
     sigVersion,
     RawSignatureData,
@@ -21,6 +21,7 @@ import {
     SubscriptionType,
     Subscription,
     Block,
+    TypedSignatureMethods,
 } from '../utils/types/ethereum';
 import { v4 as uuid } from 'uuid';
 import { BaseController } from '../infrastructure/BaseController';
@@ -58,7 +59,7 @@ import {
     extensionInstances,
     providerInstances,
 } from '../infrastructure/connection';
-import { normalizeMessageData, validateSignature } from '../utils/signature';
+import { validateSignature } from '../utils/signature';
 import { hexValue } from 'ethers/lib/utils';
 import {
     ACTIONS_TIME_INTERVALS_DEFAULT_VALUES,
@@ -340,14 +341,15 @@ export default class BlankProviderController extends BaseController<BlankProvide
                     params as [TransactionRequest],
                     portId
                 );
+            case JSONRPCMethod.eth_sign:
+            case JSONRPCMethod.personal_sign:
             case JSONRPCMethod.eth_signTypedData:
             case JSONRPCMethod.eth_signTypedData_v1:
             case JSONRPCMethod.eth_signTypedData_v3:
             case JSONRPCMethod.eth_signTypedData_v4:
-            case JSONRPCMethod.personal_sign:
                 return this._handleMessageSigning(
                     method,
-                    params as RawSignatureData[SignatureTypes],
+                    params as RawSignatureData[SignatureMethods],
                     portId
                 );
             case JSONRPCMethod.eth_subscribe:
@@ -817,13 +819,14 @@ export default class BlankProviderController extends BaseController<BlankProvide
      * EIP-712
      */
     private _handleMessageSigning = async <
-        TSignatureType extends SignatureTypes
+        TSignatureMethod extends SignatureMethods
     >(
-        method: TSignatureType,
-        params: RawSignatureData[TSignatureType],
+        method: TSignatureMethod,
+        params: RawSignatureData[TSignatureMethod],
         portId: string
     ) => {
         const { origin } = providerInstances[portId];
+        let signedMessage: string;
 
         // Get chain id
         const chainId = await this._getChainId();
@@ -849,31 +852,32 @@ export default class BlankProviderController extends BaseController<BlankProvide
         );
 
         try {
-            if (isAccepted) {
-                let signedMessage: string;
-                // Sign
-                if (method === JSONRPCMethod.personal_sign) {
-                    signedMessage =
-                        await this._keyringController.signPersonalMessage({
-                            from: normalizedParams.address,
-                            data: normalizeMessageData(
-                                normalizedParams.data as string
-                            ),
-                        });
-                } else {
-                    signedMessage =
-                        await this._keyringController.signTypedMessage(
-                            {
-                                from: normalizedParams.address,
-                                data: normalizedParams.data,
-                            },
-                            sigVersion[method]
-                        );
-                }
-                return signedMessage;
-            } else {
+            if (!isAccepted) {
                 throw new Error(ProviderError.USER_REJECTED_REQUEST);
             }
+
+            if (method === JSONRPCMethod.eth_sign) {
+                signedMessage = await this._keyringController.signMessage({
+                    from: normalizedParams.address,
+                    data: normalizedParams.data as string,
+                });
+            } else if (method === JSONRPCMethod.personal_sign) {
+                signedMessage =
+                    await this._keyringController.signPersonalMessage({
+                        from: normalizedParams.address,
+                        data: normalizedParams.data as string,
+                    });
+            } else {
+                signedMessage = await this._keyringController.signTypedMessage(
+                    {
+                        from: normalizedParams.address,
+                        data: normalizedParams.data,
+                    },
+                    sigVersion[method as TypedSignatureMethods]
+                );
+            }
+
+            return signedMessage;
         } finally {
             // Resolve the handleDapRequest callback
             callback.resolve();
@@ -1286,12 +1290,8 @@ export default class BlankProviderController extends BaseController<BlankProvide
     private _handleConnectionStatus = ({
         isProviderNetworkOnline,
         isUserNetworkOnline,
-        isNetworkChanging,
     }: NetworkControllerState) => {
-        const isConnected =
-            isProviderNetworkOnline &&
-            isUserNetworkOnline &&
-            !isNetworkChanging;
+        const isConnected = isProviderNetworkOnline && isUserNetworkOnline;
 
         if (isConnected !== this._isConnected) {
             this._isConnected = isConnected;

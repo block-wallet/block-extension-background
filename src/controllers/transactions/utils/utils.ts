@@ -16,7 +16,7 @@ const normalizers: {
 } = {
     from: (from: string) => addHexPrefix(from).toLowerCase(),
     to: (to: string) => addHexPrefix(to).toLowerCase(),
-    value: (t: BigNumber | string) => BigNumber.from(t),
+    value: (t: BigNumber | string) => BigNumber.from(t || 0),
     gasPrice: (t: BigNumber | string) => BigNumber.from(t),
     maxFeePerGas: (t: BigNumber | string) => BigNumber.from(t),
     maxPriorityFeePerGas: (t: BigNumber | string) => BigNumber.from(t),

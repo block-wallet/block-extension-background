@@ -35,7 +35,6 @@ import {
     isGasPriceValue,
     normalizeTransaction,
     validateGasValues,
-    validateMinimumIncrease,
     validateTransaction,
 } from './utils/utils';
 import { BnMultiplyByFraction } from '../../utils/bnUtils';
@@ -176,6 +175,11 @@ export interface TransactionGasEstimation {
 const BLOCK_UPDATES_BEFORE_DROP = 4;
 
 /**
+ * How many block updates to wait before considering the current transaction as dropped
+ */
+const CURRENT_TX_BLOCK_UPDATES_BEFORE_DROP = 6;
+
+/**
  * The gas cost of a send in hex (21000 in dec)
  */
 export const SEND_GAS_COST = '0x5208';
@@ -195,6 +199,23 @@ export const SPEED_UP_RATE = {
     numerator: 11,
     denominator: 10,
 };
+
+/**
+ * An enum used when calculating gas fees and to know which rate to use
+ */
+export enum SpeedUpCancel {
+    SPEED_UP = 'SPEED_UP',
+    CANCEL = 'CANCEL',
+}
+
+/**
+ * The result of determine the transaction category
+ * The result of determineTransactionCategory
+ */
+interface TransactionCategoryResponse {
+    transactionCategory: TransactionCategories;
+    methodSignature?: ContractMethodSignature;
+}
 
 /**
  * Controller responsible for submitting and managing transactions
@@ -914,6 +935,57 @@ export class TransactionController extends BaseController<
         });
     }
 
+    public getCancelSpeedUpMinGasPrice(
+        type: SpeedUpCancel,
+        transactionMeta: TransactionMeta
+    ): GasPriceValue | FeeMarketEIP1559Values {
+        const {
+            gasPricesLevels: { fast },
+        } = this._gasPricesController.getState();
+
+        const txType = getTransactionType(transactionMeta.transactionParams);
+
+        const rate =
+            type === SpeedUpCancel.CANCEL ? CANCEL_RATE : SPEED_UP_RATE;
+
+        if (txType !== TransactionType.FEE_MARKET_EIP1559) {
+            const gasPrice = BnMultiplyByFraction(
+                transactionMeta.transactionParams.gasPrice!,
+                rate.numerator,
+                rate.denominator
+            );
+            return {
+                gasPrice: gasPrice.gt(fast.gasPrice ?? BigNumber.from(0))
+                    ? gasPrice
+                    : fast.gasPrice!,
+            };
+        } else {
+            const maxFeePerGas = BnMultiplyByFraction(
+                transactionMeta.transactionParams.maxFeePerGas!,
+                rate.numerator,
+                rate.denominator
+            );
+            const maxPriorityFeePerGas = BnMultiplyByFraction(
+                transactionMeta.transactionParams.maxPriorityFeePerGas!,
+                rate.numerator,
+                rate.denominator
+            );
+
+            return {
+                maxPriorityFeePerGas: maxPriorityFeePerGas.gt(
+                    fast.maxPriorityFeePerGas ?? BigNumber.from(0)
+                )
+                    ? maxPriorityFeePerGas
+                    : fast.maxPriorityFeePerGas!,
+                maxFeePerGas: maxFeePerGas.gt(
+                    fast.maxFeePerGas ?? BigNumber.from(0)
+                )
+                    ? maxFeePerGas
+                    : fast.maxFeePerGas!,
+            };
+        }
+    }
+
     /**
      * Attempts to cancel a transaction submitting a new self transaction with the same nonce and Zero value
      *
@@ -922,7 +994,8 @@ export class TransactionController extends BaseController<
      */
     public async cancelTransaction(
         transactionID: string,
-        gasValues?: GasPriceValue | FeeMarketEIP1559Values
+        gasValues?: GasPriceValue | FeeMarketEIP1559Values,
+        gasLimit?: BigNumber
     ): Promise<void> {
         const provider = this._networkController.getProvider();
 
@@ -931,6 +1004,7 @@ export class TransactionController extends BaseController<
         if (gasValues) {
             validateGasValues(gasValues);
         }
+
         const transactionMeta = this.getTransaction(transactionID);
         if (!transactionMeta) {
             throw new Error('The specified transaction does not exist');
@@ -956,23 +1030,22 @@ export class TransactionController extends BaseController<
 
         if (type !== TransactionType.FEE_MARKET_EIP1559) {
             // gasPrice (legacy non EIP1559)
-            const minGasPrice = BnMultiplyByFraction(
-                transactionMeta.transactionParams.gasPrice!,
-                CANCEL_RATE.numerator,
-                CANCEL_RATE.denominator
-            );
+            const minGasPrice = (
+                this.getCancelSpeedUpMinGasPrice(
+                    SpeedUpCancel.CANCEL,
+                    transactionMeta
+                ) as GasPriceValue
+            ).gasPrice;
 
             const gasPriceFromValues =
                 isGasPriceValue(gasValues) && gasValues.gasPrice;
 
-            const newGasPrice =
-                (gasPriceFromValues &&
-                    validateMinimumIncrease(gasPriceFromValues, minGasPrice)) ||
-                minGasPrice;
+            const newGasPrice = gasPriceFromValues || minGasPrice;
 
             txParams = {
                 from: transactionMeta.transactionParams.from,
-                gasLimit: transactionMeta.transactionParams.gasLimit,
+                gasLimit:
+                    gasLimit ?? transactionMeta.transactionParams.gasLimit,
                 gasPrice: newGasPrice,
                 type,
                 nonce: transactionMeta.transactionParams.nonce,
@@ -981,47 +1054,29 @@ export class TransactionController extends BaseController<
             };
         } else {
             // maxFeePerGas (EIP1559)
-            const existingMaxFeePerGas =
-                transactionMeta.transactionParams.maxFeePerGas!;
-            const minMaxFeePerGas = BnMultiplyByFraction(
-                existingMaxFeePerGas,
-                CANCEL_RATE.numerator,
-                CANCEL_RATE.denominator
-            );
+            const {
+                maxFeePerGas: minMaxFeePerGas,
+                maxPriorityFeePerGas: minMaxPriorityFeePerGas,
+            } = this.getCancelSpeedUpMinGasPrice(
+                SpeedUpCancel.CANCEL,
+                transactionMeta
+            ) as FeeMarketEIP1559Values;
 
             const maxFeePerGasValues =
                 isFeeMarketEIP1559Values(gasValues) && gasValues.maxFeePerGas;
 
-            const newMaxFeePerGas =
-                (maxFeePerGasValues &&
-                    validateMinimumIncrease(
-                        maxFeePerGasValues,
-                        minMaxFeePerGas
-                    )) ||
-                minMaxFeePerGas;
+            const newMaxFeePerGas = maxFeePerGasValues || minMaxFeePerGas;
 
-            // maxPriorityFeePerGas (EIP1559)
-            const existingMaxPriorityFeePerGas =
-                transactionMeta.transactionParams.maxPriorityFeePerGas!;
-            const minMaxPriorityFeePerGas = BnMultiplyByFraction(
-                existingMaxPriorityFeePerGas,
-                CANCEL_RATE.numerator,
-                CANCEL_RATE.denominator
-            );
             const maxPriorityFeePerGasValues =
                 isFeeMarketEIP1559Values(gasValues) &&
                 gasValues.maxPriorityFeePerGas;
             const newMaxPriorityFeePerGas =
-                (maxPriorityFeePerGasValues &&
-                    validateMinimumIncrease(
-                        maxPriorityFeePerGasValues,
-                        minMaxPriorityFeePerGas
-                    )) ||
-                minMaxPriorityFeePerGas;
+                maxPriorityFeePerGasValues || minMaxPriorityFeePerGas;
 
             txParams = {
                 from: transactionMeta.transactionParams.from,
-                gasLimit: transactionMeta.transactionParams.gasLimit,
+                gasLimit:
+                    gasLimit ?? transactionMeta.transactionParams.gasLimit,
                 maxFeePerGas: newMaxFeePerGas,
                 maxPriorityFeePerGas: newMaxPriorityFeePerGas,
                 type,
@@ -1035,7 +1090,23 @@ export class TransactionController extends BaseController<
         const signedTx = await this.signTransaction(txParams, txParams.from!);
 
         const rawTransaction = bufferToHex(signedTx.serialize());
-        const { hash } = await provider.sendTransaction(rawTransaction);
+
+        let hash = '';
+        try {
+            hash = (await provider.sendTransaction(rawTransaction)).hash;
+        } catch (e) {
+            // If the send failed, because the replace fee were too low
+            // We reset the metaType so the user can still cancel
+            if (!e.message.includes('replacement fee too low')) throw e;
+
+            transactions[oldTransactionI].metaType = MetaType.REGULAR;
+
+            this.store.updateState({
+                transactions: this.trimTransactionsForState(transactions),
+            });
+
+            throw e;
+        }
 
         // Add cancellation transaction with new gas data and status
         const baseTransactionMeta: TransactionMeta = {
@@ -1074,7 +1145,8 @@ export class TransactionController extends BaseController<
      */
     public async speedUpTransaction(
         transactionID: string,
-        gasValues?: GasPriceValue | FeeMarketEIP1559Values
+        gasValues?: GasPriceValue | FeeMarketEIP1559Values,
+        gasLimit?: BigNumber
     ): Promise<void> {
         const provider = this._networkController.getProvider();
 
@@ -1107,64 +1179,47 @@ export class TransactionController extends BaseController<
         let txParams = {} as TransactionParams;
         if (type !== TransactionType.FEE_MARKET_EIP1559) {
             // gasPrice (legacy non EIP1559)
-            const minGasPrice = BnMultiplyByFraction(
-                transactionMeta.transactionParams.gasPrice!,
-                SPEED_UP_RATE.numerator,
-                SPEED_UP_RATE.denominator
-            );
+            const minGasPrice = (
+                this.getCancelSpeedUpMinGasPrice(
+                    SpeedUpCancel.SPEED_UP,
+                    transactionMeta
+                ) as GasPriceValue
+            ).gasPrice;
 
             const gasPriceFromValues =
                 isGasPriceValue(gasValues) && gasValues.gasPrice;
 
-            const newGasPrice =
-                (gasPriceFromValues &&
-                    validateMinimumIncrease(gasPriceFromValues, minGasPrice)) ||
-                minGasPrice;
+            const newGasPrice = gasPriceFromValues || minGasPrice;
 
             txParams = {
                 ...transactionMeta.transactionParams,
+                gasLimit:
+                    transactionMeta.transactionParams.gasLimit ?? gasLimit,
                 gasPrice: newGasPrice,
             };
         } else {
-            // maxFeePerGas (EIP1559)
-            const existingMaxFeePerGas =
-                transactionMeta.transactionParams.maxFeePerGas!;
-            const minMaxFeePerGas = BnMultiplyByFraction(
-                existingMaxFeePerGas,
-                SPEED_UP_RATE.numerator,
-                SPEED_UP_RATE.denominator
-            );
+            const {
+                maxFeePerGas: minMaxFeePerGas,
+                maxPriorityFeePerGas: minMaxPriorityFeePerGas,
+            } = this.getCancelSpeedUpMinGasPrice(
+                SpeedUpCancel.SPEED_UP,
+                transactionMeta
+            ) as FeeMarketEIP1559Values;
+
             const maxFeePerGasValues =
                 isFeeMarketEIP1559Values(gasValues) && gasValues.maxFeePerGas;
-            const newMaxFeePerGas =
-                (maxFeePerGasValues &&
-                    validateMinimumIncrease(
-                        maxFeePerGasValues,
-                        minMaxFeePerGas
-                    )) ||
-                minMaxFeePerGas;
+            const newMaxFeePerGas = maxFeePerGasValues || minMaxFeePerGas;
 
-            // maxPriorityFeePerGas (EIP1559)
-            const existingMaxPriorityFeePerGas =
-                transactionMeta.transactionParams.maxPriorityFeePerGas!;
-            const minMaxPriorityFeePerGas = BnMultiplyByFraction(
-                existingMaxPriorityFeePerGas,
-                SPEED_UP_RATE.numerator,
-                SPEED_UP_RATE.denominator
-            );
             const maxPriorityFeePerGasValues =
                 isFeeMarketEIP1559Values(gasValues) &&
                 gasValues.maxPriorityFeePerGas;
             const newMaxPriorityFeePerGas =
-                (maxPriorityFeePerGasValues &&
-                    validateMinimumIncrease(
-                        maxPriorityFeePerGasValues,
-                        minMaxPriorityFeePerGas
-                    )) ||
-                minMaxPriorityFeePerGas;
+                maxPriorityFeePerGasValues || minMaxPriorityFeePerGas;
 
             txParams = {
                 ...transactionMeta.transactionParams,
+                gasLimit:
+                    transactionMeta.transactionParams.gasLimit ?? gasLimit,
                 maxFeePerGas: newMaxFeePerGas,
                 maxPriorityFeePerGas: newMaxPriorityFeePerGas,
             };
@@ -1177,7 +1232,24 @@ export class TransactionController extends BaseController<
         );
 
         const rawTransaction = bufferToHex(signedTx.serialize());
-        const { hash } = await provider.sendTransaction(rawTransaction);
+
+        let hash = '';
+        try {
+            hash = (await provider.sendTransaction(rawTransaction)).hash;
+        } catch (e) {
+            // If the send failed because the replace fee were too low
+            // We reset the metaType so the user can still speed up
+            if (!e.message.includes('replacement fee too low')) throw e;
+
+            transactions[oldTransactionI].metaType = MetaType.REGULAR;
+
+            this.store.updateState({
+                transactions: this.trimTransactionsForState(transactions),
+            });
+
+            throw e;
+        }
+
         const baseTransactionMeta: TransactionMeta = {
             ...transactionMeta,
             id: uuid(),
@@ -1545,9 +1617,16 @@ export class TransactionController extends BaseController<
                     meta.transactionParams.from!
                 );
 
-                if (meta.transactionParams.nonce! >= networkNonce) {
+                // If we check for current TX
+                if (meta.transactionParams.nonce! > networkNonce) {
                     return [meta, false];
                 }
+
+                // Get default block updates count
+                const blocksBeforeDrop =
+                    meta.transactionParams.nonce! === networkNonce
+                        ? CURRENT_TX_BLOCK_UPDATES_BEFORE_DROP
+                        : BLOCK_UPDATES_BEFORE_DROP;
 
                 // We check again that we are not in the case that the new nonce is from the current transaction
                 // due to a race condition in which the tx gets confirmed right at the same moment that the buffer count
@@ -1556,11 +1635,13 @@ export class TransactionController extends BaseController<
                     transactionHash!
                 );
                 if (reCheckTx) {
+                    // If transaction return non-null response before reaching the specified drop count, reset the counter
+                    meta.blocksDropCount = 0;
                     return [meta, false];
                 }
 
                 // Check for transaction drop or replacement
-                if (meta.blocksDropCount < BLOCK_UPDATES_BEFORE_DROP) {
+                if (meta.blocksDropCount < blocksBeforeDrop) {
                     meta.blocksDropCount += 1;
                     return [meta, false];
                 } else {

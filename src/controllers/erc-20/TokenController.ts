@@ -2,7 +2,7 @@ import { IAccountTokens, ITokens, Token } from './Token';
 import { BaseController } from '../../infrastructure/BaseController';
 import NetworkController from '../NetworkController';
 import NETWORK_TOKENS_LIST, {
-    getGoBlankTokenDataByChainId,
+    getBlankTokenDataByChainId,
     NETWORK_TOKENS_LIST_ARRAY,
 } from './TokenList';
 import { isHexPrefixed, toChecksumAddress } from 'ethereumjs-util';
@@ -98,7 +98,7 @@ export class TokenController extends BaseController<TokenControllerState> {
         accountAddress?: string,
         chainId: number = this.getSelectedNetworkChainId()
     ): Promise<void> {
-        const goBlankToken = getGoBlankTokenDataByChainId(chainId);
+        const goBlankToken = getBlankTokenDataByChainId(chainId);
         if (goBlankToken) {
             const userTokensAddresses =
                 await this.getUserTokenContractAddresses(

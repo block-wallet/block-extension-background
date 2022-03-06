@@ -41,7 +41,7 @@ export enum DappReq {
 
 export interface DappRequestParams {
     [DappReq.ASSET]: WatchAssetReq;
-    [DappReq.SIGNING]: DappSignatureReq<SignatureTypes>;
+    [DappReq.SIGNING]: DappSignatureReq<SignatureMethods>;
     [DappReq.SWITCH_NETWORK]: NormalizedSwitchEthereumChainParameters;
 }
 
@@ -186,14 +186,9 @@ export interface WatchAssetConfirmParams {
 
 // EIP-712
 
-// Signature dapp request interface
-export interface DappSignatureReq<T extends SignatureTypes> {
-    method: T;
-    params: NormalizedSignatureParams<T>;
-}
-
 // Raw data for each method (Direct input from the provider)
 export interface RawSignatureData {
+    [JSONRPCMethod.eth_sign]: [string, string]; // [account, data]
     [JSONRPCMethod.personal_sign]: [string, string]; // [data, account]
     [JSONRPCMethod.eth_signTypedData]: [V1TypedData[], string]; // [data, account]
     [JSONRPCMethod.eth_signTypedData_v1]: [V1TypedData[], string]; // [data, account]
@@ -203,6 +198,7 @@ export interface RawSignatureData {
 
 // Data submitted to the dapp request
 export interface NormalizedSignatureData {
+    [JSONRPCMethod.eth_sign]: string;
     [JSONRPCMethod.personal_sign]: string;
     [JSONRPCMethod.eth_signTypedData]: V1TypedData[];
     [JSONRPCMethod.eth_signTypedData_v1]: V1TypedData[];
@@ -210,24 +206,34 @@ export interface NormalizedSignatureData {
     [JSONRPCMethod.eth_signTypedData_v4]: TypedMessage<MessageSchema>;
 }
 
-export type SignatureTypes = keyof RawSignatureData;
+export type SignatureMethods = keyof RawSignatureData;
 
 // Normalized signature parameters
-export interface SignatureParams<Type extends SignatureTypes> {
+export interface SignatureParams<T extends SignatureMethods> {
     address: string;
-    data: RawSignatureData[Type][0]; // It's actually inverted for v3 & v4 but it's the same type
+    data: RawSignatureData[T][0]; // It's actually inverted for v3 & v4 but it's the same type
 }
 
-export interface NormalizedSignatureParams<Type extends SignatureTypes> {
-    address: string;
-    data: NormalizedSignatureData[Type];
+// Signature dapp request interface
+export interface DappSignatureReq<T extends SignatureMethods> {
+    method: T;
+    params: NormalizedSignatureParams<T>;
 }
+
+export interface NormalizedSignatureParams<T extends SignatureMethods> {
+    address: string;
+    data: NormalizedSignatureData[T];
+}
+
+export type TypedSignatureMethods = Exclude<
+    SignatureMethods,
+    JSONRPCMethod.eth_sign | JSONRPCMethod.personal_sign
+>;
 
 // Adapt version to keyring sig util
 export const sigVersion: {
-    [method in SignatureTypes]: { version: 'V1' | 'V3' | 'V4' };
+    [method in TypedSignatureMethods]: { version: 'V1' | 'V3' | 'V4' };
 } = {
-    personal_sign: { version: 'V1' }, // TODO: Fix
     eth_signTypedData: { version: 'V1' },
     eth_signTypedData_v1: { version: 'V1' },
     eth_signTypedData_v3: { version: 'V3' },

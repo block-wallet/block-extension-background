@@ -5,7 +5,6 @@ declare module 'eth-keyring-controller' {
     import { TypedTransaction } from '@ethereumjs/tx';
     import { IObservableStore } from '../infrastructure/stores/ObservableStore';
     import { EventEmitter } from 'events';
-    import { SignatureData } from '../utils/types/ethereum';
 
     export interface KeyringControllerState {
         isUnlocked: boolean;
@@ -251,6 +250,23 @@ declare module 'eth-keyring-controller' {
         exportAccount(address: string): Promise<string>;
 
         /**
+         * Sign Message
+         *
+         * Attempts to sign the provided message parameters.
+         * Used for eth_sign
+         *
+         * @param msgParams - The message parameters to sign.
+         * @returns The raw signature.
+         */
+        signMessage(
+            msgParams: {
+                from: string;
+                data: string;
+            },
+            opts?: { withAppKeyOrigin: boolean }
+        ): Promise<string>;
+
+        /**
          * Sign Personal Message
          *
          * Attempts to sign the provided message paramaters.
@@ -297,10 +313,10 @@ declare module 'eth-keyring-controller' {
         signTypedMessage(
             msgParams: {
                 from: string;
-                data: SignatureData;
+                data: TypedSignatureData<TypedSignatureMethods>;
             },
             opts: {
-                version: string;
+                version: 'V1' | 'V3' | 'V4';
             }
         ): Promise<string>;
 

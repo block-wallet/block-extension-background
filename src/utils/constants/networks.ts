@@ -76,7 +76,11 @@ export const INITIAL_NETWORKS: Networks = {
         rpcUrls: [`https://mainnet-node.blockwallet.io`],
         blockExplorerUrls: ['https://etherscan.io'],
         etherscanApiUrl: 'https://api.etherscan.io',
-        actionsTimeIntervals: ACTIONS_TIME_INTERVALS_DEFAULT_VALUES,
+        actionsTimeIntervals: {
+            ...ACTIONS_TIME_INTERVALS_DEFAULT_VALUES,
+            balanceFetch: 30 * SECOND,
+            assetsAutoDiscovery: 2 * MINUTE,
+        },
     },
     ARBITRUM: {
         name: 'arbitrum',

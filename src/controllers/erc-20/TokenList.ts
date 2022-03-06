@@ -21,7 +21,7 @@ export const GOBLANK_TOKEN_DATA: {
     logo: chrome.runtime.getURL('icons/icon-48.png'),
 };
 
-export const getGoBlankTokenDataByChainId = (
+export const getBlankTokenDataByChainId = (
     chainId: number
 ): IToken | undefined => {
     if (!(chainId in GOBLANK_TOKEN_DATA.addresses)) {
@@ -227,10 +227,9 @@ for (const chainId in tokenList) {
     }
 
     // Adding/updating BlockWallet
-    const goBlankToken = getGoBlankTokenDataByChainId(parseInt(chainId));
-    if (goBlankToken) {
-        NETWORK_TOKENS_LIST[parseInt(chainId)][goBlankToken.address] =
-            goBlankToken;
+    const blankToken = getBlankTokenDataByChainId(parseInt(chainId));
+    if (blankToken) {
+        NETWORK_TOKENS_LIST[parseInt(chainId)][blankToken.address] = blankToken;
     }
 }
 

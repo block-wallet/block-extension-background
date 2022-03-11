@@ -5,7 +5,11 @@ import NETWORK_TOKENS_LIST, {
     getBlankTokenDataByChainId,
     NETWORK_TOKENS_LIST_ARRAY,
 } from './TokenList';
-import { isHexPrefixed, toChecksumAddress } from 'ethereumjs-util';
+import {
+    isHexPrefixed,
+    isValidAddress,
+    toChecksumAddress,
+} from 'ethereumjs-util';
 import { PreferencesController } from '../PreferencesController';
 import { Mutex } from 'async-mutex';
 import initialState from '../../utils/constants/initialState';
@@ -111,43 +115,18 @@ export class TokenController extends BaseController<TokenControllerState> {
                     chainId
                 );
 
+            goBlankToken.address = toChecksumAddress(goBlankToken.address);
+
             if (
                 !userTokensAddresses.includes(goBlankToken.address) &&
                 !userDeletedTokenAddresses.includes(goBlankToken.address)
             ) {
-                const blankToken =
-                    (await this.getToken(
-                        goBlankToken.address,
-                        accountAddress,
-                        chainId
-                    )) ||
-                    (
-                        await this.search(
-                            goBlankToken.symbol,
-                            true,
-                            accountAddress,
-                            chainId
-                        )
-                    )[0];
-
-                // Set token only if it is available on this network
-                if (blankToken) {
-                    blankToken.address = toChecksumAddress(blankToken.address);
-
-                    const { address: blankTokenAddress } = blankToken;
-
-                    if (
-                        !userTokensAddresses.includes(blankTokenAddress) &&
-                        !userDeletedTokenAddresses.includes(blankTokenAddress)
-                    ) {
-                        return this.addCustomToken(
-                            blankToken,
-                            accountAddress,
-                            chainId,
-                            true
-                        );
-                    }
-                }
+                return this.addCustomToken(
+                    goBlankToken,
+                    accountAddress,
+                    chainId,
+                    true
+                );
             }
         }
     }
@@ -173,7 +152,7 @@ export class TokenController extends BaseController<TokenControllerState> {
         );
 
         if (token) {
-            token.address = toChecksumAddress(token.address);
+            token.address = tokenAddress;
         }
 
         const userTokens = await this.getUserTokens(accountAddress, chainId);
@@ -183,7 +162,10 @@ export class TokenController extends BaseController<TokenControllerState> {
             accountAddress,
             chainId
         );
-        deletedUserTokens[tokenAddress] = token;
+
+        if (token) {
+            deletedUserTokens[tokenAddress] = token;
+        }
 
         await this._updateState(
             userTokens,
@@ -261,7 +243,6 @@ export class TokenController extends BaseController<TokenControllerState> {
         const token = (await this.getUserTokens(accountAddress, chainId))[
             address
         ];
-
         if (token) {
             return token;
         }
@@ -323,7 +304,6 @@ export class TokenController extends BaseController<TokenControllerState> {
         }
 
         const userTokens = await this.getUserTokens(accountAddress, chainId);
-
         const deletedUserTokens = await this.getDeletedUserTokens(
             accountAddress,
             chainId
@@ -348,10 +328,12 @@ export class TokenController extends BaseController<TokenControllerState> {
         });
 
         for (let i = 0; i < cleanedTokens.length; i++) {
-            const tokenAddress = toChecksumAddress(cleanedTokens[i].address);
+            cleanedTokens[i].address = toChecksumAddress(
+                cleanedTokens[i].address
+            );
 
-            userTokens[tokenAddress] = cleanedTokens[i];
-            delete deletedUserTokens[tokenAddress];
+            userTokens[cleanedTokens[i].address] = cleanedTokens[i];
+            delete deletedUserTokens[cleanedTokens[i].address];
         }
 
         await this._updateState(
@@ -459,9 +441,29 @@ export class TokenController extends BaseController<TokenControllerState> {
                 _deletedUserTokens[accountAddress][chainId] = {};
             }
 
+            // checksum addresses
+            const _normalizedUserTokens: ITokens = {};
+            const _normalizedDeletedUserTokens: ITokens = {};
+
+            for (const tokenAddress in userTokens) {
+                const token = userTokens[tokenAddress];
+                if (isValidAddress(token.address)) {
+                    token.address = toChecksumAddress(token.address);
+                }
+                _normalizedUserTokens[token.address] = token;
+            }
+            for (const tokenAddress in deletedUserTokens) {
+                const token = deletedUserTokens[tokenAddress];
+                if (isValidAddress(token.address)) {
+                    token.address = toChecksumAddress(token.address);
+                }
+                _normalizedDeletedUserTokens[token.address] = token;
+            }
+
             // Set new ref
-            _userTokens[accountAddress][chainId] = userTokens;
-            _deletedUserTokens[accountAddress][chainId] = deletedUserTokens;
+            _userTokens[accountAddress][chainId] = _normalizedUserTokens;
+            _deletedUserTokens[accountAddress][chainId] =
+                _normalizedDeletedUserTokens;
 
             // Update store and emit event
             this.store.updateState({

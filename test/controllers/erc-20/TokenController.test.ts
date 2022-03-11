@@ -62,20 +62,20 @@ describe('Token controller implementation', function () {
             sinon.stub(TokenController.prototype, 'getTokens').returns(
                 new Promise<ITokens>((resolve) => {
                     resolve({
-                        '0xdc31ee1784292379fbb2964b3b9c4124d8f89c60': new Token(
-                            '0xdc31ee1784292379fbb2964b3b9c4124d8f89c60',
+                        '0xdc31Ee1784292379Fbb2964b3B9C4124D8F89C60': new Token(
+                            '0xdc31Ee1784292379Fbb2964b3B9C4124D8F89C60',
                             'Goerli DAI',
                             'DAI',
                             18
                         ),
-                        '0x4102997e68f44666ad14956681506f71d7f9b4a0': new Token(
-                            '0x4102997e68f44666ad14956681506f71d7f9b4a0',
+                        '0x4102997e68f44666aD14956681506F71d7F9b4A0': new Token(
+                            '0x4102997e68f44666aD14956681506F71d7F9b4A0',
                             'Goerli USDT',
                             'USDT',
                             18
                         ),
-                        '0xb1ffd2b420a76c5de0e2da00f7263633f25d3416': new Token(
-                            '0xb1ffd2b420a76c5de0e2da00f7263633f25d3416',
+                        '0xb1FFd2B420a76c5DE0E2Da00F7263633f25D3416': new Token(
+                            '0xb1FFd2B420a76c5DE0E2Da00F7263633f25D3416',
                             'Goerli USDC',
                             'USDC',
                             18
@@ -106,20 +106,20 @@ describe('Token controller implementation', function () {
             sinon.stub(TokenController.prototype, 'getUserTokens').returns(
                 new Promise<ITokens>((resolve) => {
                     resolve({
-                        '0xdc31ee1784292379fbb2964b3b9c4124d8f89c60': new Token(
-                            '0xdc31ee1784292379fbb2964b3b9c4124d8f89c60',
+                        '0xdc31Ee1784292379Fbb2964b3B9C4124D8F89C60': new Token(
+                            '0xdc31Ee1784292379Fbb2964b3B9C4124D8F89C60',
                             'Goerli DAI',
                             'DAI',
                             18
                         ),
-                        '0x4102997e68f44666ad14956681506f71d7f9b4a0': new Token(
-                            '0x4102997e68f44666ad14956681506f71d7f9b4a0',
+                        '0x4102997e68f44666aD14956681506F71d7F9b4A0': new Token(
+                            '0x4102997e68f44666aD14956681506F71d7F9b4A0',
                             'Goerli USDT',
                             'USDT',
                             18
                         ),
-                        '0xb1ffd2b420a76c5de0e2da00f7263633f25d3416': new Token(
-                            '0xb1ffd2b420a76c5de0e2da00f7263633f25d3416',
+                        '0xb1FFd2B420a76c5DE0E2Da00F7263633f25D3416': new Token(
+                            '0xb1FFd2B420a76c5DE0E2Da00F7263633f25D3416',
                             'Goerli USDC',
                             'USDC',
                             18
@@ -153,23 +153,23 @@ describe('Token controller implementation', function () {
                 .returns(
                     new Promise<ITokens>((resolve) => {
                         resolve({
-                            '0xdc31ee1784292379fbb2964b3b9c4124d8f89c60':
+                            '0xdc31Ee1784292379Fbb2964b3B9C4124D8F89C60':
                                 new Token(
-                                    '0xdc31ee1784292379fbb2964b3b9c4124d8f89c60',
+                                    '0xdc31Ee1784292379Fbb2964b3B9C4124D8F89C60',
                                     'Goerli DAI',
                                     'DAI',
                                     18
                                 ),
-                            '0x4102997e68f44666ad14956681506f71d7f9b4a0':
+                            '0x4102997e68f44666aD14956681506F71d7F9b4A0':
                                 new Token(
-                                    '0x4102997e68f44666ad14956681506f71d7f9b4a0',
+                                    '0x4102997e68f44666aD14956681506F71d7F9b4A0',
                                     'Goerli USDT',
                                     'USDT',
                                     18
                                 ),
-                            '0xb1ffd2b420a76c5de0e2da00f7263633f25d3416':
+                            '0xb1FFd2B420a76c5DE0E2Da00F7263633f25D3416':
                                 new Token(
-                                    '0xb1ffd2b420a76c5de0e2da00f7263633f25d3416',
+                                    '0xb1FFd2B420a76c5DE0E2Da00F7263633f25D3416',
                                     'Goerli USDC',
                                     'USDC',
                                     18
@@ -199,20 +199,20 @@ describe('Token controller implementation', function () {
             sinon.stub(TokenController.prototype, 'getTokens').returns(
                 new Promise<ITokens>((resolve) => {
                     resolve({
-                        '0xdc31ee1784292379fbb2964b3b9c4124d8f89c60': new Token(
-                            '0xdc31ee1784292379fbb2964b3b9c4124d8f89c60',
+                        '0xdc31Ee1784292379Fbb2964b3B9C4124D8F89C60': new Token(
+                            '0xdc31Ee1784292379Fbb2964b3B9C4124D8F89C60',
                             'Goerli DAI',
                             'DAI',
                             18
                         ),
-                        '0x4102997e68f44666ad14956681506f71d7f9b4a0': new Token(
-                            '0x4102997e68f44666ad14956681506f71d7f9b4a0',
+                        '0x4102997e68f44666aD14956681506F71d7F9b4A0': new Token(
+                            '0x4102997e68f44666aD14956681506F71d7F9b4A0',
                             'Goerli USDT',
                             'USDT',
                             18
                         ),
-                        '0xb1ffd2b420a76c5de0e2da00f7263633f25d3416': new Token(
-                            '0xb1ffd2b420a76c5de0e2da00f7263633f25d3416',
+                        '0xb1FFd2B420a76c5DE0E2Da00F7263633f25D3416': new Token(
+                            '0xb1FFd2B420a76c5DE0E2Da00F7263633f25D3416',
                             'Goerli USDC',
                             'USDC',
                             18
@@ -237,7 +237,7 @@ describe('Token controller implementation', function () {
         it('Should return tokens', async () => {
             await tokenController.addCustomToken(
                 new Token(
-                    '0x6b175474e89094c44da98b954eedeac495271d0f',
+                    '0x6B175474E89094C44Da98b954EedeAC495271d0F',
                     'Dai Stablecoin',
                     'DAI',
                     18
@@ -260,7 +260,7 @@ describe('Token controller implementation', function () {
         });
         it('Should return tokens', async () => {
             const token = new Token(
-                '0x6b175474e89094c44da98b954eedeac495271d0f',
+                '0xdc31Ee1784292379Fbb2964b3B9C4124D8F89C60',
                 'Dai Stablecoin',
                 'DAI',
                 18
@@ -365,7 +365,7 @@ describe('Token controller implementation', function () {
         it('Adding manual tokens', async () => {
             await tokenController.addCustomToken(
                 new Token(
-                    '0x6b175474e89094c44da98b954eedeac495271d0f',
+                    '0x6B175474E89094C44Da98b954EedeAC495271d0F',
                     'Dai Stablecoin',
                     'DAI',
                     18
@@ -373,7 +373,7 @@ describe('Token controller implementation', function () {
             );
 
             const T = await tokenController.getToken(
-                '0x6b175474e89094c44da98b954eedeac495271d0f'
+                '0x6B175474E89094C44Da98b954EedeAC495271d0F'
             );
             expect(T).to.be.not.null;
         });
@@ -391,7 +391,7 @@ describe('Token controller implementation', function () {
         });
         it('Removing a token', async () => {
             const token = new Token(
-                toChecksumAddress('0x6b175474e89094c44da98b954eedeac495271d0f'),
+                toChecksumAddress('0x6B175474E89094C44Da98b954EedeAC495271d0F'),
                 'Dai Stablecoin',
                 'DAI',
                 18
@@ -446,7 +446,7 @@ describe('Token controller implementation', function () {
         it('false', () => {
             expect(
                 tokenController.isNativeToken(
-                    '0x6b175474e89094c44da98b954eedeac495271d0f'
+                    '0x6B175474E89094C44Da98b954EedeAC495271d0F'
                 )
             ).to.be.false;
             expect(tokenController.isNativeToken('wrong address')).to.be.false;

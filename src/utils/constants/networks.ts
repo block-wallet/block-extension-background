@@ -149,7 +149,10 @@ export const INITIAL_NETWORKS: Networks = {
         rpcUrls: ['https://bsc-node.blockwallet.io'],
         blockExplorerUrls: ['https://bscscan.com'],
         etherscanApiUrl: 'https://api.bscscan.com',
-        actionsTimeIntervals: ACTIONS_TIME_INTERVALS_DEFAULT_VALUES,
+        actionsTimeIntervals: {
+            ...ACTIONS_TIME_INTERVALS_DEFAULT_VALUES,
+            assetsAutoDiscovery: 2 * MINUTE,
+        },
     },
     POLYGON: {
         name: 'polygon',

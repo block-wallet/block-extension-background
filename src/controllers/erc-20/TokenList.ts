@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-var-requires */
 import { INetworkTokens, IToken } from './Token';
 import tl from '../../../token-list.json';
+import { isValidAddress, toChecksumAddress } from 'ethereumjs-util';
 
 export const GOBLANK_TOKEN_DATA: {
     addresses: { [chainId in number]: string };
@@ -12,7 +13,7 @@ export const GOBLANK_TOKEN_DATA: {
 } = {
     addresses: {
         1: '0x41A3Dba3D677E573636BA691a70ff2D606c29666',
-        137: '0xf4c83080e80ae530d6f8180572cbbf1ac9d5d435',
+        137: '0xf4C83080E80AE530d6f8180572cBbf1Ac9D5d435',
     },
     name: 'GoBlank',
     symbol: 'BLANK',
@@ -207,8 +208,16 @@ for (const chainId in tokenList) {
             }
         }
 
+        let normalizedAddress = '';
+
+        if (isValidAddress(address)) {
+            normalizedAddress = toChecksumAddress(address);
+        } else {
+            normalizedAddress = address;
+        }
+
         const iToken = {
-            address,
+            address: normalizedAddress,
             logo,
             type,
             name: token['n'],
@@ -223,7 +232,7 @@ for (const chainId in tokenList) {
             };
         }
 
-        NETWORK_TOKENS_LIST[parseInt(chainId)][address] = iToken;
+        NETWORK_TOKENS_LIST[parseInt(chainId)][normalizedAddress] = iToken;
     }
 
     // Adding/updating BlockWallet

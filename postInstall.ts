@@ -51,8 +51,8 @@ const get = async <T>(url: string): Promise<T> => {
                 typeof token.logo === 'string'
                     ? token.logo
                     : 'src' in token.logo
-                        ? token.logo['src']
-                        : '';
+                    ? token.logo['src']
+                    : '';
             this.type = token.type;
             this.symbol = token.symbol;
             this.decimals = token.decimals;
@@ -74,9 +74,9 @@ const get = async <T>(url: string): Promise<T> => {
                 de: this.decimals,
                 l1: this.l1Bridge
                     ? {
-                        t: this.l1Bridge.tokenAddress,
-                        b: this.l1Bridge.bridgeAddress,
-                    }
+                          t: this.l1Bridge.tokenAddress,
+                          b: this.l1Bridge.bridgeAddress,
+                      }
                     : undefined,
             };
 
@@ -295,6 +295,7 @@ const get = async <T>(url: string): Promise<T> => {
         56: [
             '0x5CA42204cDaa70d5c773946e69dE942b85CA6706', // POSI
             '0xD22202d23fE7dE9E3DbE11a2a88F42f4CB9507cf', // MNEP
+            '0x179960442Ece8dE9f390011b7f7c9b56C74e4D0a', // XETA
         ],
     };
 

@@ -12,6 +12,7 @@ import { PreferencesController } from './PreferencesController';
 import { TransactionController } from './transactions/TransactionController';
 import {
     getFinalTransactionStatuses,
+    MetaType,
     TransactionCategories,
     TransactionMeta,
     TransactionStatus,
@@ -212,7 +213,7 @@ export class ActivityListController extends BaseController<IActivityListState> {
             [PendingWithdrawalStatus.REJECTED]: TransactionStatus.REJECTED,
         };
 
-        const mapFc = (w: PendingWithdrawal) => {
+        const mapFc = (w: PendingWithdrawal): TransactionMeta => {
             const decimals = w.decimals || nativeCurrency.decimals; // Default to ETH
             const value = parseUnits(w.pair.amount, decimals).sub(
                 w.fee ? BigNumber.from(w.fee) : BigNumber.from(0)
@@ -235,13 +236,15 @@ export class ActivityListController extends BaseController<IActivityListState> {
                 },
                 transferType: {
                     amount: value,
-                    decimals: w.decimals,
+                    decimals: w.decimals!,
                     currency: w.pair.currency.toUpperCase(),
                 },
                 transactionReceipt: w.transactionReceipt,
                 transactionCategory: TransactionCategories.BLANK_WITHDRAWAL,
                 loadingGasValues: false,
-            } as TransactionMeta;
+                metaType: MetaType.REGULAR,
+                blocksDropCount: 0,
+            };
         };
 
         const confirmed = pendingWithdrawals

@@ -1148,7 +1148,7 @@ export class TransactionController extends BaseController<
         gasValues?: GasPriceValue | FeeMarketEIP1559Values,
         gasLimit?: BigNumber
     ): Promise<void> {
-        const provider = this._networkController.getProvider();
+        let provider = this._networkController.getProvider();
 
         if (gasValues) {
             validateGasValues(gasValues);
@@ -1156,6 +1156,13 @@ export class TransactionController extends BaseController<
         const transactionMeta = this.getTransaction(transactionID);
         if (!transactionMeta) {
             throw new Error('The specified transaction does not exist');
+        }
+
+        if (
+            transactionMeta.flashbots &&
+            this._networkController.network.chainId === 1
+        ) {
+            provider = this._networkController.getFlashbotsProvider();
         }
 
         const transactions = [...this.store.getState().transactions];

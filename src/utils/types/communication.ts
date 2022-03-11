@@ -105,6 +105,10 @@ export enum EXTERNAL {
     SET_ICON = 'SET_ICON',
 }
 
+export enum CONTENT {
+    SHOULD_INJECT = 'SHOULD_INJECT',
+}
+
 enum NETWORK {
     CHANGE = 'NETWORK_CHANGE',
     SET_SHOW_TEST_NETWORKS = 'SHOW_TEST_NETWORKS',
@@ -160,11 +164,13 @@ enum WALLET {
     SETUP_COMPLETE = 'SETUP_COMPLETE',
     RESET = 'RESET',
     DISMISS_WELCOME_MESSAGE = 'DISMISS_WELCOME_MESSAGE',
+    DISMISS_DEFAULT_WALLET_PREFERENCES = 'DISMISS_DEFAULT_WALLET_PREFERENCES',
     DISMISS_RELEASE_NOTES = 'DISMISS_RELEASE_NOTES',
     TOGGLE_RELEASE_NOTES_SUBSCRIPTION = 'TOGGLE_RELEASE_NOTES_SUBSCRIPTION',
     GENERATE_ANTI_PHISHING_IMAGE = 'GENERATE_ANTI_PHISHING_IMAGE',
     UPDATE_ANTI_PHISHING_IMAGE = 'UPDATE_ANTI_PHISHING_IMAGE',
     TOGGLE_ANTI_PHISHING_PROTECTION = 'TOGGLE_ANTI_PHISHING_PROTECTION',
+    TOGGLE_DEFAULT_BROWSER_WALLET = 'TOGGLE_DEFAULT_BROWSER_WALLET',
     SET_NATIVE_CURRENCY = 'SET_NATIVE_CURRENCY',
     GET_VALID_CURRENCIES = 'GET_VALID_CURRENCIES',
 }
@@ -204,6 +210,7 @@ export const Messages = {
     APP,
     BACKGROUND,
     BLANK,
+    CONTENT,
     DAPP,
     EXTERNAL,
     NETWORK,
@@ -407,9 +414,17 @@ export interface RequestSignatures {
         NetworkAddressBook
     ];
     [Messages.WALLET.DISMISS_WELCOME_MESSAGE]: [DismissMessage, boolean];
+    [Messages.WALLET.DISMISS_DEFAULT_WALLET_PREFERENCES]: [
+        DismissMessage,
+        boolean
+    ];
     [Messages.WALLET.DISMISS_RELEASE_NOTES]: [DismissMessage, boolean];
     [Messages.WALLET.TOGGLE_RELEASE_NOTES_SUBSCRIPTION]: [
         RequestToggleReleaseNotesSubscription,
+        void
+    ];
+    [Messages.WALLET.TOGGLE_DEFAULT_BROWSER_WALLET]: [
+        RequestToggleDefaultBrowserWallet,
         void
     ];
 
@@ -818,6 +833,10 @@ export interface RequestGetValidCurrencies {}
 
 export interface RequestToggleReleaseNotesSubscription {
     releaseNotesSubscriptionEnabled: boolean;
+}
+
+export interface RequestToggleDefaultBrowserWallet {
+    defaultBrowserWalletEnabled: boolean;
 }
 
 export interface RequestRejectTransaction {

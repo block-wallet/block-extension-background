@@ -1,13 +1,13 @@
 import { toChecksumAddress } from 'ethereumjs-util';
 import { BaseController } from '../infrastructure/BaseController';
-import { v4 as createUuid } from 'uuid';
-import { generatePhishingPrevention } from 'phishing-prevention';
 
 export interface UserSettings {
     // Setting that indicates if a warning is shown when receiving a transaction from an address different from the selected one.
     hideAddressWarning: boolean;
     subscribedToReleaseaNotes: boolean;
     useAntiPhishingProtection: boolean;
+    defaultBrowserWallet: boolean;
+    hideEstimatedGasExceedsThresholdWarning: boolean;
 }
 
 export interface Note {
@@ -40,6 +40,7 @@ export interface PreferencesControllerState {
     settings: UserSettings;
     antiPhishingImage: string;
     showWelcomeMessage: boolean;
+    showDefaultWalletPreferences: boolean;
     releaseNotesSettings: ReleaseNotesSettings;
 }
 
@@ -81,6 +82,18 @@ export class PreferencesController extends BaseController<PreferencesControllerS
     public setShowWelcomeMessage(showWelcomeMessage: boolean): void {
         this.store.updateState({
             showWelcomeMessage,
+        });
+    }
+
+    /**
+     * Sets the shhowDefaultWalletPreferences flag
+     * @param showDefaultWalletPreferences default browser wallet preference flag
+     */
+    public setShowDefaultWalletPreferences(
+        showDefaultWalletPreferences: boolean
+    ): void {
+        this.store.updateState({
+            showDefaultWalletPreferences,
         });
     }
 
@@ -208,6 +221,22 @@ export class PreferencesController extends BaseController<PreferencesControllerS
         this.store.updateState({ showWelcomeMessage });
     }
 
+    /**
+     * Gets showDefaultWalletPreferences value.
+     */
+    public get showDefaultWalletPreferences(): boolean {
+        return this.store.getState().showDefaultWalletPreferences;
+    }
+
+    /**
+     * Sets showDefaultWalletPreferences value.
+     */
+    public set showDefaultWalletPreferences(
+        showDefaultWalletPreferences: boolean
+    ) {
+        this.store.updateState({ showDefaultWalletPreferences });
+    }
+
     public set releaseNotesSettings(
         releaseNotesSettings: ReleaseNotesSettings
     ) {
@@ -238,6 +267,18 @@ export class PreferencesController extends BaseController<PreferencesControllerS
             settings: {
                 ...this.settings,
                 subscribedToReleaseaNotes: enabled,
+            },
+        });
+    }
+
+    /**
+     * Update the default browser wallet flag status in the store.
+     */
+    public updateDefaultBrowserWalletStatus(enabled: boolean) {
+        return this.store.updateState({
+            settings: {
+                ...this.settings,
+                defaultBrowserWallet: enabled,
             },
         });
     }

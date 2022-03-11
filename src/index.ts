@@ -14,6 +14,7 @@ import { migrator } from './infrastructure/stores/migrator/migrator';
 import { DeepPartial } from './utils/types/helpers';
 import log, { LogLevelDesc } from 'loglevel';
 import { resolvePreferencesAfterWalletUpdate } from './utils/userPreferences';
+import { CONTENT } from './utils/types/communication';
 
 // Initialize Block State Store
 const blankStateStore = new BlankStorageStore();
@@ -143,10 +144,12 @@ const initBlockWallet = async () => {
         setupConnection(port, blankController);
     });
 
-    // Set isBlankInitialized response
+    // Set isBlankInitialized response and should inject response
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         if (request.message === 'isBlankInitialized') {
             sendResponse({ isBlankInitialized: true });
+        } else if (request.message === CONTENT.SHOULD_INJECT) {
+            sendResponse({ shouldInject: blankController.shouldInject() });
         }
     });
 

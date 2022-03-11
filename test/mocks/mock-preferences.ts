@@ -23,11 +23,14 @@ testInitState = {
     showTestNetworks: true,
     antiPhishingImage: '',
     showWelcomeMessage: false,
+    showDefaultWalletPreferences: false,
     popupTab: 'activity',
     settings: {
         hideAddressWarning: false, // Shown by default
         subscribedToReleaseaNotes: true,
         useAntiPhishingProtection: true,
+        defaultBrowserWallet: true,
+        hideEstimatedGasExceedsThresholdWarning: false,
     },
     releaseNotesSettings: {
         lastVersionUserSawNews: '0.1.3',

@@ -124,6 +124,7 @@ const initialState: BlankAppState = {
     PreferencesController: {
         selectedAddress: '',
         showWelcomeMessage: false,
+        showDefaultWalletPreferences: false,
         localeInfo: 'en-US',
         nativeCurrency: 'usd',
         showTestNetworks: false,
@@ -133,6 +134,8 @@ const initialState: BlankAppState = {
             hideAddressWarning: false, // Shown by default,
             subscribedToReleaseaNotes: true,
             useAntiPhishingProtection: true,
+            defaultBrowserWallet: true,
+            hideEstimatedGasExceedsThresholdWarning: false, // Shown by default,
         },
         releaseNotesSettings: {
             lastVersionUserSawNews: '0.1.3',

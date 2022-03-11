@@ -94,6 +94,7 @@ import type {
     RequestToggleAntiPhishingProtection,
     RequestToggleReleaseNotesSubscription,
     RequestSetNativeCurrency,
+    RequestToggleDefaultBrowserWallet,
 } from '../utils/types/communication';
 
 import EventEmitter from 'events';
@@ -900,11 +901,17 @@ export default class BlankController extends EventEmitter {
                 return this.setUserSettings(request as RequestUserSettings);
             case Messages.WALLET.DISMISS_WELCOME_MESSAGE:
                 return this.dismissWelcomeMessage();
+            case Messages.WALLET.DISMISS_DEFAULT_WALLET_PREFERENCES:
+                return this.dismissDefaultWalletPreferences();
             case Messages.WALLET.DISMISS_RELEASE_NOTES:
                 return this.dismissReleaseNotes();
             case Messages.WALLET.TOGGLE_RELEASE_NOTES_SUBSCRIPTION:
                 return this.toggleReleaseNotesSubscription(
                     request as RequestToggleReleaseNotesSubscription
+                );
+            case Messages.WALLET.TOGGLE_DEFAULT_BROWSER_WALLET:
+                return this.toggleDefaultBrowserWallet(
+                    request as RequestToggleDefaultBrowserWallet
                 );
             case Messages.WALLET.GENERATE_ANTI_PHISHING_IMAGE:
                 return generatePhishingPreventionBase64();
@@ -1501,6 +1508,10 @@ export default class BlankController extends EventEmitter {
         }
     }
 
+    public shouldInject(): boolean {
+        return this.preferencesController.settings.defaultBrowserWallet;
+    }
+
     /**
      * Confirms or rejects the selected dapp request
      *
@@ -2030,8 +2041,11 @@ export default class BlankController extends EventEmitter {
         // Set selected address
         this.preferencesController.setSelectedAddress(account);
 
-        //Show the welcome to the wallet message
+        // Show the welcome to the wallet message
         this.preferencesController.setShowWelcomeMessage(true);
+
+        // Show the default wallet preferences
+        this.preferencesController.setShowDefaultWalletPreferences(true);
 
         // Get manifest version and init the release notes settings
         const appVersion = await getVersion();
@@ -2086,8 +2100,11 @@ export default class BlankController extends EventEmitter {
             // Initialize deposit vault
             await this.blankDepositController.initializeVault(password);
 
-            //Show the welcome to the wallet message
+            // Show the welcome to the wallet message
             this.preferencesController.setShowWelcomeMessage(true);
+
+            // Show the default wallet preferences
+            this.preferencesController.setShowDefaultWalletPreferences(true);
         } else {
             await this.blankDepositController.reinitializeVault(password);
         }
@@ -2101,8 +2118,11 @@ export default class BlankController extends EventEmitter {
         // Set selected address
         this.preferencesController.setSelectedAddress(account);
 
-        //Show the welcome to the wallet message
+        // Show the welcome to the wallet message
         this.preferencesController.setShowWelcomeMessage(true);
+
+        // Show the default wallet preferences
+        this.preferencesController.setShowDefaultWalletPreferences(true);
 
         // Get manifest version and init the release notes settings
         const appVersion = getVersion();
@@ -2591,6 +2611,14 @@ export default class BlankController extends EventEmitter {
     }
 
     /**
+     * Sets the showDefaultWalletPreferences flag to false
+     */
+    private async dismissDefaultWalletPreferences(): Promise<boolean> {
+        this.preferencesController.showDefaultWalletPreferences = false;
+        return true;
+    }
+
+    /**
      * Dismisses the release notes and sets the lastVersionUserSawNews variable
      */
     private async dismissReleaseNotes(): Promise<boolean> {
@@ -2649,6 +2677,18 @@ export default class BlankController extends EventEmitter {
     }: RequestToggleReleaseNotesSubscription) {
         this.preferencesController.updateReleseNotesSubscriptionStatus(
             releaseNotesSubscriptionEnabled
+        );
+    }
+
+    /**
+     * Sets whether the user wants to have BlockWallet as the default browser
+     * @param defaultBrowser flags that indicates the default browser status
+     */
+    private toggleDefaultBrowserWallet({
+        defaultBrowserWalletEnabled,
+    }: RequestToggleDefaultBrowserWallet) {
+        this.preferencesController.updateDefaultBrowserWalletStatus(
+            defaultBrowserWalletEnabled
         );
     }
 

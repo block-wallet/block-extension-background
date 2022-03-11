@@ -53,6 +53,8 @@ describe('userPreferences tests', () => {
                             subscribedToReleaseaNotes: false,
                             hideAddressWarning: false,
                             useAntiPhishingProtection: true,
+                            defaultBrowserWallet: true,
+                            hideEstimatedGasExceedsThresholdWarning: false,
                         },
                     },
                     '2.0.0'
@@ -72,6 +74,8 @@ describe('userPreferences tests', () => {
                             subscribedToReleaseaNotes: true,
                             hideAddressWarning: false,
                             useAntiPhishingProtection: true,
+                            defaultBrowserWallet: true,
+                            hideEstimatedGasExceedsThresholdWarning: false,
                         },
                         releaseNotesSettings: {
                             lastVersionUserSawNews: '2.0.0',
@@ -95,6 +99,8 @@ describe('userPreferences tests', () => {
                             subscribedToReleaseaNotes: true,
                             hideAddressWarning: false,
                             useAntiPhishingProtection: true,
+                            defaultBrowserWallet: true,
+                            hideEstimatedGasExceedsThresholdWarning: false,
                         },
                         releaseNotesSettings: {
                             lastVersionUserSawNews: '1.0.0',

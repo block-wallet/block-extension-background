@@ -139,8 +139,8 @@ export default {
                     decimals: 8,
                 },
             },
-            proxy: 'tornado-proxy.contract.tornadocash.eth',
-            defaultProxy: '0x722122dF12D4e14e13Ac3b6895a86e84145b6967',
+            proxy: 'tornado-router.contract.tornadocash.eth',
+            defaultProxy: '0xd90e2f925DA726b50C4Ed8D0Fb90Ad053324F31b',
         },
         netId5: {
             currencies: {

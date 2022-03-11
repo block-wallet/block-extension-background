@@ -51,8 +51,8 @@ const get = async <T>(url: string): Promise<T> => {
                 typeof token.logo === 'string'
                     ? token.logo
                     : 'src' in token.logo
-                    ? token.logo['src']
-                    : '';
+                        ? token.logo['src']
+                        : '';
             this.type = token.type;
             this.symbol = token.symbol;
             this.decimals = token.decimals;
@@ -74,9 +74,9 @@ const get = async <T>(url: string): Promise<T> => {
                 de: this.decimals,
                 l1: this.l1Bridge
                     ? {
-                          t: this.l1Bridge.tokenAddress,
-                          b: this.l1Bridge.bridgeAddress,
-                      }
+                        t: this.l1Bridge.tokenAddress,
+                        b: this.l1Bridge.bridgeAddress,
+                    }
                     : undefined,
             };
 
@@ -279,8 +279,8 @@ const get = async <T>(url: string): Promise<T> => {
             symbol: token.symbol,
             decimals: token.decimals,
             l1Bridge: {
-                tokenAddress: token.extensions.l1Address,
-                bridgeAddress: token.extensions.l1GatewayAddress,
+                tokenAddress: token.extensions?.l1Address,
+                bridgeAddress: token.extensions?.l1GatewayAddress,
             },
         });
     });

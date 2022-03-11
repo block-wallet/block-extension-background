@@ -174,6 +174,7 @@ const initialState: BlankAppState & {
         selectedAddress: '',
         localeInfo: 'en-US',
         showWelcomeMessage: false,
+        showDefaultWalletPreferences: false,
         nativeCurrency: 'usd',
         newAddedKeyOnLevel2: '',
         showTestNetworks: false,
@@ -183,6 +184,8 @@ const initialState: BlankAppState & {
             hideAddressWarning: false,
             subscribedToReleaseaNotes: true,
             useAntiPhishingProtection: true,
+            defaultBrowserWallet: true,
+            hideEstimatedGasExceedsThresholdWarning: false,
         },
         releaseNotesSettings: {
             lastVersionUserSawNews: '0.1.3',
@@ -361,11 +364,14 @@ describe('State reconciler', () => {
                 antiPhishingImage: '',
                 showTestNetworks: true,
                 showWelcomeMessage: false,
+                showDefaultWalletPreferences: false,
                 popupTab: 'activity',
                 settings: {
                     subscribedToReleaseaNotes: true,
                     hideAddressWarning: false,
                     useAntiPhishingProtection: true,
+                    defaultBrowserWallet: true,
+                    hideEstimatedGasExceedsThresholdWarning: false,
                 },
                 releaseNotesSettings: {
                     lastVersionUserSawNews: '0.1.3',

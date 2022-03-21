@@ -178,6 +178,7 @@ import {
     isCurrencyCodeValid,
 } from '../utils/currency';
 import { AvailableNetworks } from './blank-deposit/types';
+import { FEATURES } from '../utils/constants/features';
 
 export interface BlankControllerProps {
     initState: BlankAppState;
@@ -1967,13 +1968,11 @@ export default class BlankController extends EventEmitter {
         to,
         value,
     }: RequestCalculateSendTransactionGasLimit): Promise<TransactionGasEstimation> {
-
-        const isNativeToken = this.tokenController.isNativeToken(address)
-        const isCustomNetwork = this.networkController.network.isCustomNetwork
-        const isZeroValue = BigNumber.from(value).eq(BigNumber.from('0x00'))
+        const isNativeToken = this.tokenController.isNativeToken(address);
+        const isCustomNetwork = this.networkController.network.isCustomNetwork;
+        const isZeroValue = BigNumber.from(value).eq(BigNumber.from('0x00'));
 
         if (isNativeToken) {
-
             // Native Token and Not a custom network, returns SEND_GAS_COST const.
             if (!isCustomNetwork) {
                 return {
@@ -1996,19 +1995,19 @@ export default class BlankController extends EventEmitter {
                 //On L2 networks (Arbitrum for now), added fallback gas limit value to 1,200,000 to use in case estimation fails.
                 BigNumber.from('0x0c3500')
             );
-
         }
 
         // Not native token, calculate transaction's gas limit.
         const transferTransaction = this.getTransferTransaction();
 
-        return transferTransaction.calculateTransactionGasLimit({
-            tokenAddress: address,
-            to,
-            amount: value,
-        } as TransferTransactionPopulatedTransactionParams,
-            isZeroValue);
-
+        return transferTransaction.calculateTransactionGasLimit(
+            {
+                tokenAddress: address,
+                to,
+                amount: value,
+            } as TransferTransactionPopulatedTransactionParams,
+            isZeroValue
+        );
     }
 
     private getTransferTransaction(): TransferTransaction {
@@ -2074,6 +2073,7 @@ export default class BlankController extends EventEmitter {
         password,
         seedPhrase,
         reImport,
+        defaultNetwork,
     }: RequestWalletImport): Promise<boolean> {
         // Clear accounts in accountTracker
         this.accountTrackerController.clearAccounts();
@@ -2134,13 +2134,29 @@ export default class BlankController extends EventEmitter {
         // Unlock when account is created so vault will be ready after onboarding
         await this.appStateController.unlock(password);
 
-        // Asynchronously import the deposits
+        // Force network to be mainnet if it is not provided
+        let network: string = AvailableNetworks.MAINNET;
+        let runImportDeposits = true;
+
+        if (defaultNetwork) {
+            const fullNetwork =
+                this.networkController.searchNetworkByName(defaultNetwork);
+            //only allow test networks
+            if (fullNetwork && fullNetwork.test) {
+                network = defaultNetwork;
+                runImportDeposits = fullNetwork.features.includes(
+                    FEATURES.TORNADO
+                );
+            }
+        }
+        await this.networkController.setNetwork(network);
+
         await this.blankDepositController.initialize();
 
-        // Force network change to mainnet
-        await this.networkController.setNetwork(AvailableNetworks.MAINNET);
-
-        this.blankDepositController.importDeposits(password, seedPhrase);
+        if (runImportDeposits) {
+            // Asynchronously import the deposits
+            this.blankDepositController.importDeposits(password, seedPhrase);
+        }
 
         // Create and assign to the Wallet an anti phishing image
         const base64Image = await generatePhishingPreventionBase64();
@@ -2215,7 +2231,7 @@ export default class BlankController extends EventEmitter {
      * Method to mark setup process as complete and to fire a notification.
      *
      */
-    private async completeSetup({ }: RequestCompleteSetup): Promise<void> {
+    private async completeSetup({}: RequestCompleteSetup): Promise<void> {
         if (!this.isSetupComplete) {
             showSetUpCompleteNotification();
             this.isSetupComplete = true;
@@ -2524,7 +2540,7 @@ export default class BlankController extends EventEmitter {
      * Remove all entries in the book
      *
      */
-    private async addressBookClear({ }: RequestAddressBookClear): Promise<boolean> {
+    private async addressBookClear({}: RequestAddressBookClear): Promise<boolean> {
         return this.addressBookController.clear();
     }
 
@@ -2560,7 +2576,7 @@ export default class BlankController extends EventEmitter {
      *
      * @returns - A map with the entries
      */
-    private async addressBookGet({ }: RequestAddressBookGet): Promise<NetworkAddressBook> {
+    private async addressBookGet({}: RequestAddressBookGet): Promise<NetworkAddressBook> {
         return this.addressBookController.get();
     }
 

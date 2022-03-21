@@ -270,20 +270,24 @@ const get = async <T>(url: string): Promise<T> => {
         )
     ).tokens;
 
-    arbitrumTokenList.forEach((token: any) => {
-        TOKENS[NETWORKS['arbitrum']][token.address] = new Token({
-            address: token.address,
-            name: token.name,
-            logo: token.logoURI || '',
-            type: '',
-            symbol: token.symbol,
-            decimals: token.decimals,
-            l1Bridge: {
-                tokenAddress: token.extensions?.l1Address,
-                bridgeAddress: token.extensions?.l1GatewayAddress,
-            },
+    arbitrumTokenList
+        .filter(
+            (token: any) => parseInt(token.chainId) === NETWORKS['arbitrum']
+        )
+        .forEach((token: any) => {
+            TOKENS[NETWORKS['arbitrum']][token.address] = new Token({
+                address: token.address,
+                name: token.name,
+                logo: token.logoURI || '',
+                type: '',
+                symbol: token.symbol,
+                decimals: token.decimals,
+                l1Bridge: {
+                    tokenAddress: token.extensions?.l1Address,
+                    bridgeAddress: token.extensions?.l1GatewayAddress,
+                },
+            });
         });
-    });
 
     // tokens to exclude due to e.g. spam
     const excludedTokens = {

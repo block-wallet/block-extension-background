@@ -675,6 +675,7 @@ export interface RequestWalletImport {
     password: string;
     seedPhrase: string;
     reImport?: boolean;
+    defaultNetwork?: string;
 }
 
 export interface RequestWalletReset {
